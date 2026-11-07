@@ -1,0 +1,63 @@
+% =====================================================================
+% SpinVL -- CVPR submission draft (SELF-CONTAINED / FALLBACK BUILD)
+%
+% This file compiles with a plain TeX Live / MiKTeX installation and
+% reproduces the CVPR two-column layout (10pt Times, 6.875 x 8.875 in
+% text block) without requiring the official kit.
+%
+% >>> For the OFFICIAL submission build, use main_cvpr_official.tex
+%     together with cvpr.sty from the CVPR author kit instead.
+% =====================================================================
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[letterpaper,text={6.875in,8.875in},centering,top=1in]{geometry}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[font=small,labelfont=bf,textfont=small]{caption}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+\setlength{\columnsep}{0.31in}
+\renewcommand{\arraystretch}{1.05}
+
+\newcommand{\modelname}{SpinVL}
+\newcommand{\ie}{\emph{i.e.}}
+\newcommand{\eg}{\emph{e.g.}}
+
+\begin{document}
+
+% ---------------------------------------------------------------------
+% Title block (full width)
+% ---------------------------------------------------------------------
+\twocolumn[{
+\begin{center}
+{\LARGE\bfseries \modelname: Turning Frozen Text LLMs into Vision-Language\\[2pt]
+Models with Zero Visual Tokens in the Backbone\par}
+\vspace{10pt}
+{\large Anonymous CVPR submission\par}
+\vspace{4pt}
+{\small Paper ID 0000\par}
+\end{center}
+\vspace{6pt}
+\input{sections/0_abstract_wide}
+\vspace{10pt}
+}]
+
+\input{sections/1_intro}
+\input{sections/2_related}
+\input{sections/3_method}
+\input{sections/4_experiments}
+\input{sections/5_conclusion}
+
+{\small
+\bibliographystyle{plainnat}
+\bibliography{references}
+}
+
+\end{document}

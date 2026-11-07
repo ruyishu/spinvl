@@ -1,0 +1,202 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Overview and Notation}
+\label{sec:overview}
+
+Let $f_\theta$ be a frozen pure-text LLM with $L$ layers and hidden width
+$d$, and let $\mathcal{S}\subset\{1,\dots,L\}$ be the set of layers we
+modulate. An image is processed into $N$ patches by the teacher's image
+processor. \modelname{} never places those patches inside the context of the
+deeper layers. Instead, it produces a compact set of cell features
+$V\in\mathbb{R}^{N_c\times d_v}$ and uses them to rotate the inputs of the
+seven linear projections ($q,k,v,o,\text{gate},\text{up},\text{down}$) in
+layers $\mathcal{S}$, as illustrated in Fig.~\ref{fig:arch}.
+
+Two model variants share this skeleton. \emph{\modelname-Tower} takes $V$
+from a frozen external vision encoder and is the direct successor of
+rotation-based injection. \emph{\modelname-Free} additionally deletes the
+encoder: $V=\hat{v}$ is produced by the student's own first $K$ layers, and
+all image tokens are dropped afterwards. Both variants are followed by the
+same on-policy distillation stage.
+
+\subsection{Tier 1: Built-in Vision Frontend}
+\label{sec:frontend}
+
+\paragraph{Static rotation with channel scaling.}
+A pure orthogonal rotation preserves norms and angles but cannot change
+singular values, so it can re-aim features without re-weighting channels. We
+therefore compose a rotation with a learned diagonal rescaling,
+\begin{equation}
+W' = W\,R_{\mathrm{s}}\,\mathrm{diag}(d),
+\qquad
+R_{\mathrm{s}} = (I-A)^{-1}(I+A),
+\label{eq:static}
+\end{equation}
+where $A$ is skew-symmetric, $R_{\mathrm{s}}\in SO(b)$ acts on $b{=}64$
+channel blocks, and $d\in\mathbb{R}^{d_{\text{in}}}$ is initialised to ones.
+Because $R_{\mathrm{s}}$ is orthogonal, training stays well conditioned and
+the rescaling supplies the degrees of freedom that orthogonality removes. For
+$K{=}4$ layers and seven projections this amounts to $2.4$M parameters,
+compared with $201$M for copying the layers and $3.7$M for rank-$16$ LoRA.
+
+\paragraph{Reading the image once.}
+Image patches are linearly embedded and given row and column positional
+embeddings. They are then propagated through the student's first $K$ layers
+with \emph{bidirectional} attention under Eq.~\eqref{eq:static}, which lets
+every patch see the whole image---the regime a vision encoder needs and the
+regime a causal LLM never provides. Adjacent $2\times2$ patches are
+concatenated and projected by a two-layer merger into one cell feature,
+\begin{equation}
+\hat{v} = \mathrm{MLP}\big(\mathrm{LN}([h_{4i},h_{4i+1},h_{4i+2},h_{4i+3}])\big)
+\in\mathbb{R}^{d_v},
+\label{eq:merge}
+\end{equation}
+yielding $\hat{v}\in\mathbb{R}^{N_c\times d_v}$ with $N_c=N/4$.
+
+\paragraph{Discard, then modulate.}
+After Eq.~\eqref{eq:merge} the image tokens are deleted: the remaining
+$L-K$ layers see a purely textual sequence. The only trace of the image is
+$\hat{v}$, which drives the deep rotations of Sec.~\ref{sec:dynamic}. This is
+the structural difference from built-in-encoder approaches that keep the
+patches in the sequence.
+
+\paragraph{Optional feature supervision.}
+When a teacher encoder is available during training we align $\hat{v}$ with
+its cell features $v^{\ast}$ through
+\begin{equation}
+\mathcal{L}_{\mathrm{feat}} = \frac{1}{N_c}\sum_{i}\Big[(1-\cos(\hat v_i,v^\ast_i))
++ \lambda_1\,\ell_{\mathrm{smooth}}\big(\tfrac{\hat v_i}{s},\tfrac{v^\ast_i}{s}\big)\Big],
+\label{eq:feat}
+\end{equation}
+with $s=\mathrm{std}(v^\ast)$ and $\lambda_1{=}0.5$. This term only shapes the
+frontend during training; it is not needed at inference and, as we show in
+Sec.~\ref{sec:abl}, the model still learns to read images when it is
+switched off entirely.
+
+\subsection{Tier 2: Dynamic Rotation Injection}
+\label{sec:dynamic}
+
+\paragraph{Generating a rotation per layer.}
+For a layer $\ell\in\mathcal{S}$ we keep $N_b$ learnable queries
+$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Visual features are
+projected to keys and values, and the queries read out a context
+\begin{equation}
+C_\ell = \mathrm{MHA}\big(Q_\ell,\; W_k^{(\ell)}V,\; W_v^{(\ell)}V\big),
+\qquad
+\theta_\ell = W_o^{(\ell)}C_\ell ,
+\label{eq:ctx}
+\end{equation}
+where $\theta_\ell\in\mathbb{R}^{N_b\times b(b-1)/2}$ collects the strictly
+lower-triangular entries of the skew-symmetric blocks. The rotation is
+\begin{equation}
+A_r = \mathrm{tril}(\theta_{\ell,r}) - \mathrm{tril}(\theta_{\ell,r})^{\top},
+\qquad
+R_{\ell,r} = (I-A_r)^{-1}(I+A_r),
+\label{eq:cayley}
+\end{equation}
+and a rotated projection computes
+\begin{equation}
+y = \big(x\,R_{\ell}\big)W^{\top}+b,
+\qquad
+R_\ell = \mathrm{blkdiag}(R_{\ell,1},\dots,R_{\ell,N_b}),
+\label{eq:rotlin}
+\end{equation}
+with $x$ split into $N_b$ channel blocks. All seven projections of a layer
+share the same visual context, which is computed once and cached for the whole
+forward pass, so generation pays for the rotation generator once per layer
+rather than once per step.
+
+\paragraph{Multi-frequency rotation (\texttt{mf}).}
+A single pooled context forces every block to look at the image through the
+same aperture. We split the $N_b$ blocks into three bands, following the
+frequency division of rotary position embeddings~\citep{su2024roformer}. 
+Low-frequency blocks attend to the globally pooled feature $\bar v$;
+mid-frequency blocks
+attend to all cells with a smooth positional encoding
+($\mathrm{base}{=}10^4$); high-frequency blocks use a rapidly varying encoding
+($\mathrm{base}{=}50$, softmax temperature $\tau{=}0.25$) to sharpen
+localisation. A zero-initialised gate then mixes rotation with identity,
+\begin{equation}
+\tilde x_r = x_r + 2\sigma\big(W_g x\big)_r\,\big(x_rR_{\ell,r}-x_r\big),
+\label{eq:gate}
+\end{equation}
+so the model starts from the pretrained function and adds rotation only where
+it helps. This variant favours multi-step reasoning over diagrams, where the
+model must repeatedly consult a small region.
+
+\paragraph{Spatial-anchor hybrid (\texttt{hyb}).}
+The second variant keeps the orthogonal rotation and adds a residual that can
+address a few locations,
+\begin{equation}
+\Delta x = W_{\mathrm{out}}\,
+\mathrm{MHA}\big(W_q\,\mathrm{LN}(x),\, K_a,\, V_a\big),
+\qquad
+y=\big(xR_\ell+\Delta x\big)W^{\top}+b,
+\label{eq:hyb}
+\end{equation}
+where $K_a,V_a$ come from $M{=}16$ learnable anchors pooled from $V$, and
+$W_{\mathrm{out}}$ is zero-initialised. The cross-attention lives in the
+$d_q$-dimensional subspace, so it costs $O(TM d_q)$ instead of
+$O(TN d)$; no visual token enters self-attention. This variant favours
+perception and hallucination tests, where a single global transform is too
+coarse to decide whether a small object is present.
+
+Both variants are single switches; the backbone stays frozen in all cases.
+
+\subsection{Modality Decoupling}
+\label{sec:decouple}
+
+The rotations act through a context-local wrapper that is active only inside
+the image branch. When no visual context is set, each wrapped projection calls
+its original weight, so a text-only input follows exactly the computation of
+the unmodified LLM and produces bit-identical logits. This is what allows
+\modelname{} to claim lossless text ability while still being trained on image
+data. It also explains a negative result we report in
+Sec.~\ref{sec:eff}: any variant that merges vision adapters into the text
+pathway---LoRA, static rotation, or rotation with scaling---loses most of its
+arithmetic ability, which is why the decoupled design is not a convenience but
+a requirement.
+
+\subsection{Step 2: Online Policy Distillation}
+\label{sec:opd}
+
+Teacher-forced training only visits prefixes of ground-truth answers. Greedy
+decoding visits the student's own prefixes, where a small early error moves
+the hidden state off the training manifold; rotation-injected models are
+particularly sensitive because the rotation is conditioned on the current
+hidden state itself. We therefore distil on-policy.
+
+Let $\hat y_{1:T}\sim\pi_S(\cdot\mid I,q)$ be a rollout sampled from the
+student with the vision context active. A frozen teacher VLM
+$\pi_T$ (an instruction-tuned model of the same tokenizer family) scores the
+\emph{same} trajectory in one forward pass, giving
+\begin{equation}
+\mathcal{L}_{\mathrm{OPD}}=
+\mathbb{E}_{\hat y}\Big[\sum_{t=1}^{T}
+\mathrm{KL}\!\left(\pi_T(\cdot\mid I,q,\hat y_{<t})\,\Big\|\,
+\pi_S(\cdot\mid I,q,\hat y_{<t})\right)
++\lambda_{\mathrm{ce}}\,\mathcal{L}_{\mathrm{CE}}\Big],
+\label{eq:opd}
+\end{equation}
+where the cross-entropy term anchors the model to gold tokens that appear in
+the rollout. For \modelname-Free{} we add Eq.~\eqref{eq:feat} with a small
+weight to keep $\hat v$ stable while the frontend is updated. Training uses
+$500$ steps, batch size $4$, learning rates $2\times10^{-5}$ (rotation) and
+$10^{-5}$ (frontend), and takes under fifteen minutes on one GPU. The
+distillation is thus a cheap post-hoc stage rather than a second training run.
+
+\subsection{Complexity}
+\label{sec:complexity}
+
+For a text length $T$ and $N$ visual patches, a token-concatenation layer
+attends over $T+N$ positions, costing $O((T+N)^2d)$; the visual part alone is
+$O(2TNd+N^2d)$ and is paid in every layer. \modelname{} pays $O(N^2d)$ for
+$K$ early layers in the frontend and, in the remaining $L-K$ layers, only
+$O(T^2d)$ for self-attention plus $O(TN d_q)$ for the anchor residual, with
+$d_q\ll d$. The block rotations add $O(Tdb)$, independent of both $N$ and the
+number of projections' output width in the leading term. Measured at $4096$
+patches the total drops from $9.85$ to $2.54$ TFLOPs
+(Tab.~\ref{tab:eff}), and because the frontend encodes patches once with
+bidirectional attention, wall-clock latency at high resolution improves as
+well.

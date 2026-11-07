@@ -4,6 +4,8 @@
 
 **一句话简介**：**SpinVL** 基于完全冻结的纯文本 LLM（`Qwen3-0.6B / 1.7B / 8B`），**既不需要外挂庞大的视觉编码器（Vision Tower），也不往深层 LLM 主干里塞任何视觉 Token**，仅靠**双层正交旋转（Dual-Tier Orthogonal Rotation）+ 在线策略蒸馏（VL-OPD）**，在节省 **74.2% FLOPs**、**100% 保持原装纯文本智商**的前提下，在视觉感知、抗幻觉与数学推理上打平甚至反超传统 LLaVA，并全方位击败同赛道的 ROSE 与 VoRA。
 
+> **投稿稿**：完整 CVPR 格式 LaTeX 源码在 [`paper/`](paper/)，见 [paper/README.md](paper/README.md)（官方模板版 `main_cvpr_official.tex` 与免模板可编译版 `main.tex`）。
+
 ---
 
 ## 一、Motivation（为什么要做 SpinVL？）

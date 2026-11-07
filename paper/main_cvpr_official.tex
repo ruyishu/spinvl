@@ -1,0 +1,58 @@
+% =====================================================================
+% SpinVL -- CVPR submission draft (OFFICIAL CVPR KIT BUILD)
+%
+% Instructions:
+%   1. Download the official CVPR author kit and copy cvpr.sty,
+%      cvpr_eso.sty, and eso-pic.sty into this folder.
+%   2. Switch the mode below:  [review] -> camera-ready draft,
+%      [pagenumbers] for the numbered review copy (double-blind).
+%   3. Compile with:  pdflatex main_cvpr_official
+%                     bibtex  main_cvpr_official
+%                     pdflatex main_cvpr_official   (twice)
+%
+% The body sections are shared verbatim with main.tex.
+% =====================================================================
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[pagenumbers]{cvpr} % anonymous review copy with page numbers
+
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage[font=small,labelfont=bf,textfont=small]{caption}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+\renewcommand{\arraystretch}{1.05}
+
+\newcommand{\modelname}{SpinVL}
+\newcommand{\ie}{\emph{i.e.}}
+\newcommand{\eg}{\emph{e.g.}}
+
+\title{\modelname: Turning Frozen Text LLMs into Vision-Language Models\\ with Zero Visual Tokens in the Backbone}
+
+\author{Anonymous CVPR submission\\Paper ID 0000}
+
+\begin{document}
+
+\maketitle
+
+\input{sections/0_abstract}
+
+\input{sections/1_intro}
+\input{sections/2_related}
+\input{sections/3_method}
+\input{sections/4_experiments}
+\input{sections/5_conclusion}
+
+{\small
+\bibliographystyle{ieeenat_fullname}
+\bibliography{references}
+}
+
+\end{document}

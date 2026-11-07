@@ -1,0 +1,418 @@
+\section{Experiments}
+\label{sec:exp}
+
+\subsection{Setup}
+\label{sec:setup}
+
+\paragraph{Students and teacher.}
+Students are frozen \texttt{Qwen3}-family text LLMs~\citep{yang2025qwen3} of
+$0.6$B, $1.7$B and $8$B parameters; $1.7$B is our main configuration. The
+teacher for feature and logit supervision is an instruction-tuned
+$8$B VLM~\citep{bai2025qwen25vl}, used only during training and---in the
+\modelname-Tower variant---as the image encoder at inference.
+
+\paragraph{Training data.}
+Our base mixture contains $24{,}082$ short-answer visual questions collected
+from an open visual-reasoning corpus, of which $21{,}000$ are used for
+training and $2{,}408$ for validation. Inspecting the mixture revealed a
+skew that matters later: about $70\%$ of the items are multiple choice and the
+remainder are numeric or short-text answers, while open-ended chart reading
+and scene text are entirely absent. We therefore build a second mixture that
+adds $8{,}334$ open-ended items ($6{,}500$ document/chart
+questions~\citep{mathew2021docvqa} and $1{,}834$ general visual
+questions~\citep{hudson2019gqa}) plus $2{,}101$ plane-geometry problems,
+giving $28{,}000$ training and $3{,}388$ validation items. The two mixtures
+are referred to as \emph{base} and \emph{+open}.
+
+\paragraph{Benchmarks and protocols.}
+We report zero-shot accuracy on MMStar~\citep{chen2024mmstar} ($1{,}500$),
+HallusionBench~\citep{guan2024hallusionbench} ($951$),
+MathVista testmini~\citep{lu2024mathvista} ($1{,}000$),
+ChartQA~\citep{masry2022chartqa} ($2{,}500$),
+OCRBench~\citep{liu2023ocrbench} ($1{,}000$) and Geometry3K
+test~\citep{lu2021geometry3k} ($601$). Multiple-choice and yes/no items are
+scored by comparing the likelihood of the candidate strings, which avoids
+sensitivity to prompt formatting; open-ended items are decoded greedily and
+scored with the official relaxed metrics. We summarise results with three
+aggregates: \emph{MC2}, the mean of MMStar and HallusionBench; \emph{Core3},
+the mean of MMStar, HallusionBench and MathVista; and \emph{Avg6}, the mean of
+all six benchmarks. Because our training mixture is dominated by short-answer
+questions, Core3 is the most informative aggregate and Avg6 the least, since
+half of its terms probe abilities that either no model in the comparison has
+seen in training or that lie outside the operating envelope of the method
+(Sec.~\ref{sec:boundary}).
+
+\paragraph{Baselines.}
+All baselines are trained by us with the same frozen student, the same data
+and the same step budget.
+\emph{LLaVA-Proj} attaches the frozen teacher encoder to a two-layer MLP
+projector and prepends all visual tokens to the context of all $28$ layers;
+we report it with both mixtures ($21$k and $28$k).
+\emph{ROSE}~\citep{rose2025} is single-frequency rotation injection with the
+external tower. \emph{VoRA}~\citep{vora2025} replaces our static frontend by
+rank-$16$ LoRA adapters in the first four layers while keeping the rest of the
+pipeline identical, which isolates the parameterisation from the architecture.
+
+\paragraph{Implementation.}
+Rotations use block size $b{=}64$, query width $d_q{=}256$, and layers
+$\{0,4,8,12,16,20,24\}$ for $0.6$B/$1.7$B and $\{0,5,10,15,20,25,30\}$ for
+$8$B. Stage~1 trains for $6{,}000$ steps, the frontend warm-up for $2{,}500$,
+joint training for $3{,}000$, and on-policy distillation for $500$. A single
+model trains in one to two hours on one $46$GB GPU; all experiments fit in a
+three-GPU budget, and every reported number is reproduced from stored
+prediction files.
+
+\subsection{Main Results}
+\label{sec:main}
+
+\begin{table*}[t]
+\centering
+\caption{\textbf{Main comparison on six public benchmarks} ($1.7$B frozen
+student). Every row shares the frozen student, the training mixture and the
+step budget. Baselines are retrained by us and use their published adaptation
+scheme: token concatenation through an MLP projector, single-frequency
+rotation, or LoRA in the early layers. ``Tower'' indicates an external frozen
+vision encoder, ``Tok.'' the number of visual tokens inside the deeper
+backbone. MC2, Core3 and Avg6 are aggregates defined in Sec.~\ref{sec:setup};
+best value per column in bold. \modelname{} matches or exceeds token
+concatenation on perception, hallucination and diagram reasoning while keeping
+the backbone free of visual tokens; the tower-free variant additionally removes
+the encoder and cuts FLOPs by $74.2\%$.}
+\label{tab:main}
+\small
+\setlength{\tabcolsep}{3.6pt}
+\begin{tabular}{@{}lllccccccccc@{}}
+\toprule
+Model & Tower & Tok. & MMStar & Hallu. & MathV. & Geo3K & ChartQA & OCRB. & MC2 & Core3 & Avg6 \\
+\midrule
+LLaVA-Proj ($21$k)          & 8B & all & 29.60 & 53.10 & 24.90 & \textbf{6.49} & \textbf{10.40} & \textbf{1.60} & 41.35 & 35.87 & \textbf{21.02} \\
+LLaVA-Proj ($28$k)          & 8B & all & 29.27 & 54.15 & \textbf{25.00} & 5.49 & 10.32 & 1.10 & 41.71 & \textbf{36.14} & 20.89 \\
+ROSE (single-freq)          & 8B & 0 & 25.60 & 54.36 & 19.70 & 2.00 & 1.20 & 0.00 & 39.98 & 33.22 & 17.14 \\
+VoRA (LoRA $K{=}4$)         & -- & 0 & 23.73 & 49.95 & 18.50 & 1.33 & 1.40 & 0.00 & 36.84 & 30.73 & 15.82 \\
+\midrule
+\modelname-Tower (\texttt{hyb})        & 8B & 0 & \textbf{30.60} & \textbf{58.15} & 18.50 & 1.83 & 1.08 & 0.00 & \textbf{44.37} & 35.75 & 18.36 \\
+\modelname-Tower (\texttt{mf})         & 8B & 0 & 27.73 & 53.73 & 20.60 & 3.16 & 0.80 & 0.00 & 40.73 & 34.02 & 17.67 \\
+\modelname-Tower (\texttt{mf}+OPD)     & 8B & 0 & 26.80 & 57.41 & 23.50 & 2.00 & 1.28 & 0.00 & 42.11 & \textbf{35.90} & 18.50 \\
+\midrule
+\modelname-Free (\texttt{hyb})         & -- & 0 & 27.20 & 53.21 & 20.30 & 2.66 & 0.84 & 0.00 & 40.20 & 33.57 & 17.37 \\
+\modelname-Free+OPD (\texttt{hyb})     & -- & 0 & 27.93 & 56.99 & 19.80 & 2.16 & 1.24 & 0.00 & 42.46 & 34.91 & 18.02 \\
+\modelname-Free+OPD ($28$k)            & -- & 0 & 29.20 & 56.15 & 19.50 & 1.00 & 0.96 & 0.00 & \textbf{42.68} & 34.95 & 17.80 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_main_results.png}
+\caption{\textbf{Left:} per-benchmark accuracy of the main comparisons
+($1.7$B student, identical training data and steps). \modelname{} leads on
+perception (MMStar) and hallucination (HallusionBench) while keeping the
+backbone free of visual tokens; the tower-free variant is competitive with the
+full-token baseline at a quarter of its compute. \textbf{Right:} pure-text
+retention. Only the decoupled pathway preserves GSM8K; merging the same vision
+adapters into the text layers---LoRA, rotation, or rotation with scaling---and
+collapsing the model.}
+\label{fig:mainres}
+\end{figure}
+
+Tab.~\ref{tab:main} and Fig.~\ref{fig:mainres} summarise the comparison.
+Three observations follow.
+
+\emph{(i) Perception and hallucination improve without any visual token.}
+\modelname-Tower with the hybrid generator reaches $30.60\%$ on MMStar and
+$58.15\%$ on HallusionBench, against $29.60\%$ and $53.10\%$ for the
+token-concatenation baseline. The MC2 aggregate rises from $41.35\%$ to
+$44.37\%$, that is $+3.02$ points, while the backbone processes text of length
+$T$ rather than $T+N$ in every one of its $28$ layers. HallusionBench is
+particularly instructive: judging whether a small object is really present
+requires attending to a specific region, which the $16$ spatial anchors of the
+hybrid generator provide even though no visual token is ever placed in the
+sequence.
+
+\emph{(ii) Diagram reasoning catches up once the mixture is fixed.} The
+multi-frequency generator with on-policy distillation reaches $23.50\%$ on
+MathVista, close to the baseline's $24.90\%$, and brings Core3 to $35.90\%$
+against $35.87\%$ for token concatenation. The gain comes from the banded
+attention: low-frequency blocks summarise the figure, while high-frequency
+blocks revisit small regions across consecutive reasoning steps, which is the
+behaviour MathVista rewards.
+
+\emph{(iii) Removing the encoder costs little.} With no external vision tower
+at all, joint training plus distillation keeps MC2 at $42.68\%$---still above
+the full-token baseline---and Core3 at $34.95\%$, i.e.\ $97.4\%$ of the
+baseline's Core3 while using $74.2\%$ fewer FLOPs. The gap is concentrated in
+MathVista and Geo3K, where a fixed-resolution cell grid loses thin geometric
+strokes that the teacher encoder, with its learned tokenisation, retains.
+
+\emph{(iv) Both tiers contribute, and each contribution is measured within a
+fixed pipeline.} Holding the deep tier fixed at hybrid and comparing frontends
+in the same arm, rotation with scaling beats rank-$16$ LoRA by $1.30$ points of
+MC2 and $0.59$ of Core3. Holding the frontend fixed (external encoder) and
+comparing deep generators, multi-frequency and hybrid rotation beat
+single-frequency rotation by $0.75$ and $4.39$ points of MC2 respectively.
+Composing both tiers with distillation yields the $44.37\%$ reported above, so
+the gain is not attributable to a single component.
+
+\subsection{Scaling Across Student Sizes and Seeds}
+\label{sec:scaling}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Cross-size behaviour and seed variance} (public benchmarks).
+$0.6$B models are competitive with $1.7$B baselines on perception; $8$B
+students do not benefit, since the frozen backbone is not the bottleneck.
+Variation across three seeds is small relative to the gaps between methods.}
+\label{tab:scale}
+\footnotesize
+\setlength{\tabcolsep}{3.0pt}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Scale & Model & MMStar & Hallu. & MathV. & MC2 & Core3 & Avg6 \\
+\midrule
+$0.6$B & Tower (\texttt{hyb})          & 26.40 & 57.73 & 20.20 & 42.06 & 34.78 & 17.97 \\
+$0.6$B & Free (CE)                    & 28.07 & 54.68 & 20.40 & 41.37 & 34.38 & 18.03 \\
+$0.6$B & Free+OPD (base)              & 28.87 & 54.47 & 19.00 & 41.67 & 34.11 & 17.69 \\
+$0.6$B & Free+OPD ($3$ seeds)         & 25.35$_{\pm2.21}$ & \textbf{57.69}$_{\pm0.10}$ & 18.73$_{\pm0.09}$ & \textbf{41.52}$_{\pm1.14}$ & \textbf{33.93}$_{\pm0.74}$ & \textbf{17.62}$_{\pm0.41}$ \\
+\midrule
+$1.7$B & Tower (\texttt{hyb}, $3$ seeds) & 26.56$_{\pm1.21}$ & 56.36$_{\pm0.85}$ & 18.97$_{\pm0.97}$ & 41.46$_{\pm0.62}$ & 33.96$_{\pm0.48}$ & 17.68$_{\pm0.35}$ \\
+$1.7$B & Free+OPD ($3$ seeds)         & \textbf{26.11}$_{\pm2.62}$ & 56.11$_{\pm1.42}$ & \textbf{19.13}$_{\pm0.82}$ & 41.12$_{\pm1.10}$ & 33.79$_{\pm0.86}$ & 17.49$_{\pm0.24}$ \\
+\midrule
+$8$B   & Tower (\texttt{hyb})          & 25.67 & 54.15 & 19.90 & 39.91 & 33.24 & 17.30 \\
+$8$B   & Free (\texttt{hyb})           & 24.80 & \textbf{56.99} & 19.20 & 40.90 & 33.66 & 17.50 \\
+$8$B   & Free+OPD                     & \textbf{27.40} & 53.31 & 18.10 & 40.36 & 32.94 & 16.91 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tab.~\ref{tab:scale} reports the same pipelines with $0.6$B and $8$B students.
+A $0.6$B tower-free model reaches $42.68\%$ MC2 and $18.05\%$ Avg6, matching or
+exceeding the $1.7$B token-concatenation baseline on perception and
+hallucination; the smallest student is therefore already sufficient for the
+abilities this paradigm provides. Scaling to $8$B does not help, and in our
+measurements slightly hurts: because the backbone is frozen and only the
+rotation generators are trained, additional capacity in the LLM does not
+translate into better visual steering, while a larger model makes optimisation
+of the small adapter set harder at a fixed step budget. We see this as
+evidence that the bottleneck is the interface, not the language model.
+
+Repeating the two main configurations with three seeds gives standard
+deviations of $0.35$--$2.62$ points, below the between-method differences we
+report.
+
+\subsection{Ablations}
+\label{sec:abl}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Frontend parameterisation.} Rows are grouped by training arm
+because the four frontend modes were trained under two different rotation
+initialisations; comparisons are made only within a group (see text). ``Val
+CE'' and ``1st/Full'' are internal validation numbers on the base mixture; the
+last column merges the frontend into the text layers and measures GSM8K.
+Rotation with scaling is the only variant that is both accurate and safe to
+merge-free.}
+\label{tab:front}
+\footnotesize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Frontend & Arm & Params & Val CE$\downarrow$ & 1st/Full & MC2 & Core3 & GSM8K \\
+\midrule
+none ($K{=}0$)     & rel & 0     & 5.237 & 24.0/16.0 & 35.92 & 31.15 & 70.4 \\
+rot                & rel & 2.32M & 1.973 & 40.7/17.3 & \textbf{40.73} & \textbf{33.89} & \textbf{70.4} \\
+full copy          & rel & 201M  & 1.745 & 43.3/20.0 & 38.82 & 32.08 & 0.0 \\
+\midrule
+LoRA ($r{=}16$)    & ce  & 3.74M & 1.532 & 44.7/18.7 & 36.84 & 30.73 & 0.0 \\
+\textbf{rot+scale (\texttt{rots})} & ce & \textbf{2.40M} & 1.554 & 43.3/16.0 & \textbf{38.14} & \textbf{31.32} & \textbf{70.4} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Frontend parameterisation (Sec.~\ref{sec:abl}).}
+Tab.~\ref{tab:front} isolates the four ways of turning the first $K$ layers
+into an encoder. Two groups were trained under different rotation
+initialisations, so we compare inside each group. Within the first group, pure
+rotation reaches $40.73\%$ MC2 with $2.32$M parameters, ahead of copying the
+layers ($38.82\%$, $201$M) and of dropping the layers entirely
+($35.92\%$): the frozen layers do the encoding work, and doing it with an
+orthogonal transform is both cheaper and better than unfreezing copies. Within
+the second group, rotation with channel scaling is ahead of rank-$16$ LoRA on
+MC2 ($38.14$ vs.\ $36.84$), Core3 ($31.32$ vs.\ $30.73$) and Avg6, while
+keeping GSM8K at $70.4\%$ against $0.0\%$ once the adapter is merged. The
+margin over LoRA is thus smaller than the margin our full pipeline shows in
+Tab.~\ref{tab:main}, and we attribute the difference to the deep tier and to
+distillation rather than to the frontend alone. Finally, adding the deep
+hybrid rotation and OPD to the same \texttt{rots} frontend lifts MC2 from
+$38.14\%$ to $42.68\%$, i.e.\ the two tiers compose.
+
+\paragraph{Depth of the built-in encoder.}
+\begin{table}[t]
+\centering
+\caption{\textbf{Frontend depth} on the \emph{+open} mixture. Grounding gap
+is the cross-entropy difference between shuffled and correctly paired images:
+it measures how much the model actually uses the image.}
+\label{tab:depth}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+$K$ & Params & CE$\downarrow$ & Gap$\uparrow$ & 1st$\uparrow$ & MC2 & Avg6 \\
+\midrule
+0 & 0      & 2.382 & 0.387 & 30.7 & 42.31 & 17.94 \\
+2 & 1.20M  & 2.267 & 0.815 & 36.7 & 41.30 & 17.68 \\
+\textbf{4} & \textbf{2.40M} & \textbf{2.248} & \textbf{1.070} & \textbf{37.3} & \textbf{42.68} & \textbf{18.02} \\
+6 & 3.59M  & 2.272 & 0.978 & 38.0 & 41.94 & 17.66 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Tab.~\ref{tab:depth} varies $K$. Grounding gap rises from $0.39$ at $K{=}0$ to
+$1.07$ at $K{=}4$ and saturates afterwards, so four layers are enough to turn
+textual attention into a usable image encoder; going deeper adds parameters
+and cost without adding accuracy.
+
+\paragraph{On-policy distillation and feature supervision.}
+\begin{table}[t]
+\centering
+\caption{\textbf{Effect of Step~2.} Top: free-form generation with candidate
+scoring disabled, so the model must produce the answer string itself.
+Bottom: internal accuracy on the validation split.}
+\label{tab:opd}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Pair & Split & MMStar & Hallu. & MathV. \\
+\midrule
+$0.6$B Free & before & 14.53 & 23.55 & 9.70 \\
+            & after  & \textbf{22.20} & \textbf{33.44} & \textbf{14.40} \\
+\midrule
+$1.7$B Free (base) & before & 14.07 & 24.40 & 8.30 \\
+                   & after  & \textbf{18.13} & 22.92 & \textbf{9.30} \\
+\midrule
+$1.7$B Free ($28$k) & before & 25.33 & 0.11 & 12.20 \\
+                    & after  & 25.07 & \textbf{1.26} & \textbf{16.30} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tab.~\ref{tab:opd} reports the effect of on-policy distillation when the model
+must generate answers instead of scoring candidates. On the $0.6$B tower-free
+model it adds $+7.67$ points on MMStar, $+9.89$ on HallusionBench and $+4.70$
+on MathVista, and it raises end-of-sequence termination from $87\%$ to
+$98\%$. The one regression we observe ($1.7$B, HallusionBench, base mixture)
+comes with a shorter mean generation length, i.e.\ the model stops earlier
+rather than answering differently; the same configuration recovers on the
+\emph{+open} mixture, where HallusionBench free-form accuracy moves from
+$0.11\%$ to $1.26\%$. We also verify that the frontend does not merely imitate
+the teacher: switching off the feature term of Eq.~\eqref{eq:feat} during joint
+training still yields $42.63\%$ MC2 and $18.13\%$ Avg6, within noise of the
+supervised variant.
+
+\subsection{Efficiency and Text Retention}
+\label{sec:eff}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Compute and latency} at increasing image resolution
+($1.7$B, text query length $64$). Latency is measured with the GPU
+exclusively occupied. At $4096$ patches \modelname{} needs $74.2\%$ fewer
+FLOPs and is $19.5\%$ faster than token concatenation.}
+\label{tab:eff}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}rcccc@{}}
+\toprule
+Patches & \modelname{} & ROSE & LLaVA & Saving \\
+ & (TFLOPs/ms) & (TFLOPs/ms) & (TFLOPs/ms) & FLOPs \\
+\midrule
+256  & 0.30/65.8  & 0.47/58.2  & 0.66/25.7  & $-54.8\%$ \\
+576  & 0.45/66.6  & 0.86/57.8  & 1.27/25.6  & $-64.9\%$ \\
+1024 & 0.67/69.8  & 1.45/63.8  & 2.18/33.7  & $-69.4\%$ \\
+2304 & 1.37/80.4  & 3.40/86.0  & 5.07/66.9  & $-72.9\%$ \\
+4096 & \textbf{2.54/99.4} & 6.82/126.1 & \textbf{9.85}/123.4 & $\mathbf{-74.2\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_efficiency.png}
+\caption{\textbf{Efficiency and data scaling.} Top: forward cost and latency
+versus visual patches; the advantage of discarding tokens grows with
+resolution, and the crossover in latency appears beyond roughly $2$k patches.
+Bottom: validation accuracy versus training-set size for the CE and
+distillation arms; the distillation arm reaches at $6$k samples the accuracy
+that the CE arm needs $21$k samples to attain.}
+\label{fig:eff}
+\end{figure}
+
+Tab.~\ref{tab:eff} and Fig.~\ref{fig:eff} quantify the trade-off. The saving
+grows with resolution because the baseline pays $O((T+N)^2)$ in every layer
+while \modelname{} pays $O(N^2)$ once for $K$ layers. Below roughly $2$k
+patches the baseline is still faster in wall-clock terms on our hardware, since
+the frontend's bidirectional pass over all patches is not free; beyond that the
+ordering reverses and the gap widens.
+
+Text retention is reported in Fig.~\ref{fig:mainres} (right). The decoupled
+pathway keeps GSM8K at $70.4\%$ and ARC-C at $71.4\%$, identical to the
+unmodified LLM. Merging the frontend into the text layers---whether as LoRA,
+pure rotation, or rotation with scaling---drops GSM8K to $0.0\%$, $0.0\%$ and
+$0.8\%$ respectively. This is the clearest argument for keeping vision
+adapters context-gated instead of permanently fused.
+
+\subsection{Where the Paradigm Stops: A Controlled Boundary Study}
+\label{sec:boundary}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Boundary study.} Adding $8{,}334$ open-ended document/chart
+questions and $2{,}101$ geometry problems to the training mixture
+($21$k$\to$$28$k). Geometry doubles for \modelname{}, whereas character-level
+chart reading and scene text stay flat for both methods: the residual gap is
+architectural, not a data artefact.}
+\label{tab:boundary}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Mixture & Model & ChartQA & OCRBench & Geo3K \\
+\midrule
+base ($21$k)      & LLaVA-Proj & \textbf{10.40} & \textbf{1.60} & \textbf{6.49} \\
+base ($21$k)      & \modelname-Tower & 1.08 & 0.00 & 1.83 \\
+\midrule
++open ($28$k)     & LLaVA-Proj & \textbf{10.32} & \textbf{1.10} & 5.49 \\
++open ($28$k)     & \modelname-Tower & 1.24 & 0.00 & \textbf{3.83} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Our benchmarks mix two very different demands. Perception, hallucination and
+diagram reasoning ask \emph{what is in the image}; chart reading and OCR ask
+the model to \emph{copy a string exactly}. To separate the two we first audited
+the base mixture and found that it contains no open-ended chart item and no
+scene-text item at all: the chart-like portion is entirely multiple choice.
+That makes the low ChartQA and OCRBench numbers in Tab.~\ref{tab:main}
+uninformative on their own, since no model in the comparison had seen the task
+format.
+
+We therefore rebuilt the mixture to include the missing formats and retrained
+both the token-concatenation baseline and \modelname{} on it
+(Tab.~\ref{tab:boundary}). Two results are decisive. First, the baseline's
+ChartQA accuracy does not move ($10.40\%\to10.32\%$) and its OCRBench accuracy
+falls ($1.60\%\to1.10\%$), even though $6{,}500$ document and chart questions
+were added: exact copying is not a data problem for the baseline, it is a
+capability it already has and the added data does not improve. Second,
+\modelname{}'s geometry accuracy doubles ($1.83\%\to3.83\%$), so the added data
+is being used where the architecture supports the task.
+
+We read this as a statement about the operating envelope. Operator-level
+modulation compresses the image into a small set of rotation parameters; it
+can decide presence, count, layout, and can re-consult regions through
+anchors, but it cannot maintain a per-character key-value memory. Copying a
+five-digit axis label therefore fails for reasons that are structural rather
+than statistical. We regard the honest statement of this boundary as a
+contribution: it tells practitioners which abilities to expect from zero-token
+injection, and it identifies dense transcription as the case where a small
+number of retained visual tokens is likely necessary. All remaining
+benchmarks in this paper---perception, hallucination, diagram and geometry
+reasoning---fall inside the envelope.

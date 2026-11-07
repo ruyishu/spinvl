@@ -1,0 +1,54 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Token-concatenation VLMs.}
+LLaVA-style models connect a pretrained vision encoder to an LLM through a
+light projector and train on instruction data~\citep{liu2023llava,
+liu2024improved}. Scaling this recipe mostly means scaling the visual token
+count, which is precisely what makes inference expensive at high resolution.
+Our baseline belongs to this family and is retrained under our data and
+compute budget so that comparisons are apples-to-apples.
+
+\paragraph{Parameter-efficient adaptation.}
+Low-rank adapters~\citep{hu2021lora} insert trainable matrices next to frozen
+weights. VoRA-style built-in encoders~\citep{vora2025} apply them to the
+LLM's early layers and distil a vision tower, thereby removing the tower but
+keeping visual tokens in the sequence. Additive adapters also perturb the
+weights permanently; our measurements show that merging them into a text model
+destroys arithmetic reasoning, which motivates a multiplicative,
+context-gated form of adaptation.
+
+\paragraph{Rotation-based injection.}
+ROSE~\citep{rose2025} converts visual features into block-diagonal orthogonal
+matrices and rotates linear inputs, so the backbone never sees a visual token.
+The construction guarantees that activations preserve their norm, and it is
+attractive because the text model remains intact. Its limitations---a static,
+globally pooled rotation, dependence on an external tower, and exposure bias
+under greedy decoding---are the starting point of this work. We keep the
+orthogonal construction, make it dynamic and spatially addressable, remove the
+tower, and add on-policy distillation.
+
+\paragraph{Distillation for VLMs.}
+Knowledge distillation transfers a teacher's output distribution to a
+student~\citep{hinton2015distilling}; sequence-level variants have been used
+to compress captioning and VQA models. Off-policy distillation on
+ground-truth prefixes, however, does not cover the states a model visits when
+it decodes on its own. Online policy distillation---sampling from the student
+and scoring those samples---closes this gap and is the second step of our
+framework.
+
+\paragraph{Orthogonal parameterisation.}
+The Cayley transform $R=(I-A)^{-1}(I+A)$ maps a skew-symmetric matrix to a
+special orthogonal matrix~\citep{golub2013matrix} and has been used to
+stabilise recurrent and convolutional models. We use it to parameterise
+block-diagonal rotations that are cheap to generate, exactly orthogonal, and
+composable with a learned diagonal rescaling.
+
+\paragraph{Benchmarks.}
+We evaluate on general perception (MMStar~\citep{chen2024mmstar}), visual
+hallucination (HallusionBench~\citep{guan2024hallusionbench}), chart reasoning
+(ChartQA~\citep{masry2022chartqa}), scene-text understanding
+(OCRBench~\citep{liu2023ocrbench}), mathematical reasoning
+(MathVista~\citep{lu2024mathvista}), and plane geometry
+(Geometry3K~\citep{lu2021geometry3k}). Text retention is measured with GSM8K
+\citep{cobbe2021gsm8k} and ARC-Challenge~\citep{clark2018arc}.
