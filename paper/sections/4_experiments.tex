@@ -101,19 +101,19 @@ VoRA (LoRA $K{=}4$)         & -- & 0 & 23.73 & 49.95 & 18.50 & 1.33 & 1.40 & 0.0
 \end{tabular}
 \end{table*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\linewidth]{fig_main_results.png}
-\caption{\textbf{Left:} per-benchmark accuracy of the main comparisons
-($1.7$B student, identical training data and steps). \modelname{} leads on
-perception (MMStar) and hallucination (HallusionBench) while keeping the
-backbone free of visual tokens; the tower-free variant is competitive with the
-full-token baseline at a quarter of its compute. \textbf{Right:} pure-text
-retention. Only the decoupled pathway preserves GSM8K; merging the same vision
-adapters into the text layers---LoRA, rotation, or rotation with scaling---and
-collapsing the model.}
+\includegraphics[width=0.96\textwidth]{fig_main_results.png}
+\caption{\textbf{(a) Main public benchmark comparison} ($1.7$B student,
+identical training data and steps, plus $0.6$B tower-free). \modelname{} leads
+on perception (MMStar) and anti-hallucination (HallusionBench) while keeping
+the backbone free of visual tokens; the tower-free variant matches or exceeds
+full-token LLaVA on MC2 at a quarter of its compute. \textbf{(b) Pure-text
+retention.} Only the decoupled pathway preserves GSM8K ($70.4\%$) and ARC-C
+($71.4\%$); permanently merging vision adapters---LoRA, rotation, or rotation
+with scaling---collapses mathematical reasoning.}
 \label{fig:mainres}
-\end{figure}
+\end{figure*}
 
 Tab.~\ref{tab:main} and Fig.~\ref{fig:mainres} summarise the comparison.
 Three observations follow.
@@ -202,6 +202,18 @@ report.
 \subsection{Ablations}
 \label{sec:abl}
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{fig_ablations.png}
+\caption{\textbf{Ablation studies.} \textbf{(a)} Built-in frontend
+parameterisation grouped by initialisation arm (\texttt{rel} vs.\ \texttt{ce}).
+\textbf{(b)} Built-in encoder depth $K\in\{0,2,4,6\}$, showing validation
+first-token accuracy and visual grounding gap (shuffled minus paired CE).
+\textbf{(c)} Step~2 online policy distillation (\texttt{VL-OPD}) gains under
+forced free-form greedy generation.}
+\label{fig:abl}
+\end{figure*}
+
 \begin{table}[t]
 \centering
 \caption{\textbf{Frontend parameterisation.} Rows are grouped by training arm
@@ -229,8 +241,8 @@ LoRA ($r{=}16$)    & ce  & 3.74M & 1.532 & 44.7/18.7 & 36.84 & 30.73 & 0.0 \\
 \end{table}
 
 \paragraph{Frontend parameterisation (Sec.~\ref{sec:abl}).}
-Tab.~\ref{tab:front} isolates the four ways of turning the first $K$ layers
-into an encoder. Two groups were trained under different rotation
+Tab.~\ref{tab:front} and Fig.~\ref{fig:abl}(a) isolate the four ways of turning
+the first $K$ layers into an encoder. Two groups were trained under different rotation
 initialisations, so we compare inside each group. Within the first group, pure
 rotation reaches $40.73\%$ MC2 with $2.32$M parameters, ahead of copying the
 layers ($38.82\%$, $201$M) and of dropping the layers entirely
@@ -334,17 +346,18 @@ Patches & \modelname{} & ROSE & LLaVA & Saving \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\linewidth]{fig_efficiency.png}
-\caption{\textbf{Efficiency and data scaling.} Top: forward cost and latency
-versus visual patches; the advantage of discarding tokens grows with
-resolution, and the crossover in latency appears beyond roughly $2$k patches.
-Bottom: validation accuracy versus training-set size for the CE and
-distillation arms; the distillation arm reaches at $6$k samples the accuracy
-that the CE arm needs $21$k samples to attain.}
+\includegraphics[width=0.98\textwidth]{fig_efficiency.png}
+\caption{\textbf{Efficiency and data scaling.} \textbf{(a, b)} Forward compute
+(TFLOPs) and exclusive-GPU latency versus visual patch count; discarding image
+tokens after layer $K{=}4$ saves $74.2\%$ FLOPs at $4096$ patches and crosses
+over in wall-clock latency beyond ${\sim}2$k patches. \textbf{(c)} Validation
+full-answer accuracy versus training sample size $N\in\{1\text{k}\dots21\text{k}\}$:
+distillation (\texttt{KD+Rel}) achieves $3.5\times$ sample efficiency at
+$N{=}6$k, while the \texttt{CE} arm scales best at full data.}
 \label{fig:eff}
-\end{figure}
+\end{figure*}
 
 Tab.~\ref{tab:eff} and Fig.~\ref{fig:eff} quantify the trade-off. The saving
 grows with resolution because the baseline pays $O((T+N)^2)$ in every layer
