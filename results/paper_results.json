@@ -1,0 +1,251 @@
+{
+  "efficiency_K4": {
+    "K": 4,
+    "Q": 64,
+    "rows": [
+      {
+        "N_patches": 256,
+        "cells": 64,
+        "ours": {
+          "tflops": 0.29628563456,
+          "ms": 65.82927703857422
+        },
+        "rose": {
+          "tflops": 0.473760268288,
+          "ms": 58.21716785430908
+        },
+        "keep": {
+          "tflops": 0.362656301056,
+          "ms": 15.832662582397461
+        },
+        "llava": {
+          "tflops": 0.655558180864,
+          "ms": 25.65181255340576
+        },
+        "peak_gib": 4.650540351867676
+      },
+      {
+        "N_patches": 576,
+        "cells": 144,
+        "ours": {
+          "tflops": 0.44660948992000005,
+          "ms": 66.63954257965088
+        },
+        "rose": {
+          "tflops": 0.862819975168,
+          "ms": 57.79159069061279
+        },
+        "keep": {
+          "tflops": 0.591224897536,
+          "ms": 15.805482864379883
+        },
+        "llava": {
+          "tflops": 1.273186484224,
+          "ms": 25.5734920501709
+        },
+        "peak_gib": 4.679635524749756
+      },
+      {
+        "N_patches": 1024,
+        "cells": 256,
+        "ours": {
+          "tflops": 0.668337176576,
+          "ms": 69.8024034500122
+        },
+        "rose": {
+          "tflops": 1.450310631424,
+          "ms": 63.77553939819336
+        },
+        "keep": {
+          "tflops": 0.91368718336,
+          "ms": 17.978906631469727
+        },
+        "llava": {
+          "tflops": 2.183139426304,
+          "ms": 33.70940685272217
+        },
+        "peak_gib": 4.728848934173584
+      },
+      {
+        "N_patches": 2304,
+        "cells": 576,
+        "ours": {
+          "tflops": 1.3743224258559998,
+          "ms": 80.40487766265869
+        },
+        "rose": {
+          "tflops": 3.404043649024,
+          "ms": 85.96646785736084
+        },
+        "keep": {
+          "tflops": 1.85086246912,
+          "ms": 29.2665958404541
+        },
+        "llava": {
+          "tflops": 5.0740477296640005,
+          "ms": 66.86031818389893
+        },
+        "peak_gib": 4.869460105895996
+      },
+      {
+        "N_patches": 4096,
+        "cells": 1024,
+        "ours": {
+          "tflops": 2.5430904012799997,
+          "ms": 99.41732883453369
+        },
+        "rose": {
+          "tflops": 6.824182939648,
+          "ms": 126.14560127258301
+        },
+        "keep": {
+          "tflops": 3.202367881216,
+          "ms": 45.90260982513428
+        },
+        "llava": {
+          "tflops": 9.845692432384,
+          "ms": 123.41952323913574
+        },
+        "peak_gib": 5.066315174102783
+      }
+    ],
+    "note": "latency 仅在独占 GPU 时可信；keep 不计 K 层读图的额外开销（偏向对手）"
+  },
+  "language_preservation_K4": {
+    "K": 4,
+    "gsm_n": 250,
+    "arc_n": 500,
+    "results": {
+      "base": {
+        "gsm8k": 0.704,
+        "arc_c": 0.714
+      },
+      "rot_K4": {
+        "gsm8k": 0.0,
+        "arc_c": 0.242
+      },
+      "rots_K4": {
+        "gsm8k": 0.008,
+        "arc_c": 0.234
+      },
+      "lora16_K4": {
+        "gsm8k": 0.0,
+        "arc_c": 0.274
+      }
+    }
+  },
+  "main_table_v4": {
+    "q17_proj_n21000": {
+      "mmstar": 29.6,
+      "hallusion": 53.1,
+      "chartqa": 10.4,
+      "ocrbench": 1.6,
+      "mathvista": 24.9,
+      "geometry3k": 6.49
+    },
+    "q17_p15_proj": {
+      "mmstar": 29.27,
+      "hallusion": 54.15,
+      "chartqa": 10.32,
+      "ocrbench": 1.1,
+      "mathvista": 25.0,
+      "geometry3k": 5.49
+    },
+    "q17_rose_single_ce": {
+      "mmstar": 25.6,
+      "hallusion": 54.36,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 19.7,
+      "geometry3k": 2.0
+    },
+    "q17_vora_lora_mf": {
+      "mmstar": 23.73,
+      "hallusion": 49.95,
+      "chartqa": 1.4,
+      "ocrbench": 0.0,
+      "mathvista": 18.5,
+      "geometry3k": 1.33
+    },
+    "q17_tower_hybrid_ce": {
+      "mmstar": 30.6,
+      "hallusion": 58.15,
+      "chartqa": 1.08,
+      "ocrbench": 0.0,
+      "mathvista": 18.5,
+      "geometry3k": 1.83
+    },
+    "q17_p15_tower_hybrid_ce": {
+      "mmstar": 28.27,
+      "hallusion": 56.05,
+      "chartqa": 1.24,
+      "ocrbench": 0.0,
+      "mathvista": 19.6,
+      "geometry3k": 3.83
+    },
+    "q17_p15_tower_mf_opd": {
+      "mmstar": 26.8,
+      "hallusion": 57.41,
+      "chartqa": 1.28,
+      "ocrbench": 0.0,
+      "mathvista": 23.5,
+      "geometry3k": 2.0
+    },
+    "q17_free_hybrid_opd": {
+      "mmstar": 27.93,
+      "hallusion": 56.99,
+      "chartqa": 1.24,
+      "ocrbench": 0.0,
+      "mathvista": 19.8,
+      "geometry3k": 2.16
+    },
+    "q17_p15_free_hybrid_opd_s2": {
+      "mmstar": 29.2,
+      "hallusion": 56.15,
+      "chartqa": 0.96,
+      "ocrbench": 0.0,
+      "mathvista": 19.5,
+      "geometry3k": 1.0
+    },
+    "q17_p16_free_noalign": {
+      "mmstar": 27.53,
+      "hallusion": 57.73,
+      "chartqa": 1.44,
+      "ocrbench": 0.0,
+      "mathvista": 19.4,
+      "geometry3k": 2.66
+    },
+    "q06_p15_tower_hybrid_ce": {
+      "mmstar": 26.4,
+      "hallusion": 57.73,
+      "chartqa": 0.84,
+      "ocrbench": 0.0,
+      "mathvista": 20.2,
+      "geometry3k": 2.66
+    },
+    "q06_p15_free_hybrid_opd": {
+      "mmstar": 27.53,
+      "hallusion": 57.83,
+      "chartqa": 2.16,
+      "ocrbench": 0.0,
+      "mathvista": 18.6,
+      "geometry3k": 2.16
+    },
+    "q8b_p15_tower_hybrid_ce": {
+      "mmstar": 25.67,
+      "hallusion": 54.15,
+      "chartqa": 0.92,
+      "ocrbench": 0.0,
+      "mathvista": 19.9,
+      "geometry3k": 3.16
+    },
+    "q8b_p15_free_hybrid_ce": {
+      "mmstar": 24.8,
+      "hallusion": 56.99,
+      "chartqa": 1.52,
+      "ocrbench": 0.0,
+      "mathvista": 19.2,
+      "geometry3k": 2.5
+    }
+  }
+}

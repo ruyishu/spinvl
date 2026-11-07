@@ -1,1 +1,0 @@
-{"K":4,"gsm_n":250,"arc_n":500,"results":{"base":{"gsm8k":0.704,"arc_c":0.714},"rot_K4":{"gsm8k":0.0,"arc_c":0.242},"rots_K4":{"gsm8k":0.008,"arc_c":0.234},"lora16_K4":{"gsm8k":0.0,"arc_c":0.274}}}
