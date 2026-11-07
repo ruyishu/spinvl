@@ -1,0 +1,19 @@
+README.md
+  s_2218750ca2fee0::t_35cd67722a6c29 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "ee4d2cf99cadd79ad0ea148cd5313e9270b3e58c",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
