@@ -1,0 +1,288 @@
+"""叙事 1 + 2 合体（Stage 2B）：原图 → 前 K 层内置编码器 → v̂ → VRMG 动态旋转 → 纯文本通路。
+
+推理时没有任何外部视觉塔，也没有图片 token 进入后 L-K 层。
+--stage oracle        只评测：用老师视觉特征（叙事 1 的上限）
+--stage front_frozen  只评测：用 Stage 2A 的前端产出 v̂，不联调
+--stage joint         联调 front + VRMG（CE + KD + Rel + 特征对齐），结束时三种口径一并评测
+"""
+
+import argparse
+import json
+import math
+import os
+import random
+import sys
+import time
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import imgdata  # noqa: E402
+import train_final as tf  # noqa: E402
+from front import PatchFront, feature_loss  # noqa: E402
+from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
+
+B = "/data/ibu-bi-ai-share-disk"
+STUDENT_LAYERS, TEACHER_LAYERS = tf.STUDENT_LAYERS, tf.TEACHER_LAYERS
+
+
+def make_collate(data, paths, ip, tok, seq, need_teacher):
+    def fn(idx_list):
+        ids, mask, labels, vis, vmask, k_ids, k_vals, k_mask, hidden = tf.collate(idx_list, data, tok, seq, need_teacher)
+        pvs, grids, lens, tgts = [], [], [], []
+        for j, i in enumerate(idx_list):
+            img = Image.open(paths[data["ids"][i]]).convert("RGB")
+            o = ip(images=[img], return_tensors="pt")
+            pvs.append(o["pixel_values"].to(torch.float16))
+            grids.append(o["image_grid_thw"][0])
+            lens.append(o["pixel_values"].shape[0])
+            tgts.append(vis[j, : data["vlen"][i]].clone())
+        L = max(lens)
+        pv = torch.zeros(len(idx_list), L, pvs[0].shape[1], dtype=torch.float16)
+        for j, p in enumerate(pvs):
+            pv[j, : lens[j]] = p
+        return dict(ids=ids, mask=mask, labels=labels, k_ids=k_ids, k_vals=k_vals, k_mask=k_mask, hidden=hidden,
+                    pv=pv, grid=torch.stack(grids), lens=lens, tgts=tgts)
+    return fn
+
+
+def pad_vis(v_list, dev):
+    n = max(v.shape[0] for v in v_list)
+    out = torch.zeros(len(v_list), n, v_list[0].shape[-1], device=dev)
+    m = torch.zeros(len(v_list), n, device=dev)
+    for i, v in enumerate(v_list):
+        out[i, : v.shape[0]] = v
+        m[i, : v.shape[0]] = 1
+    return out, m
+
+
+@torch.no_grad()
+def joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, source, n_acc=150, bs=8):
+    """source: 'front'（v̂）或 'teacher'（老师视觉特征）。返回 CE(配对/打乱/无图) 与 teacher-forced 准确率。"""
+    model.eval(); front.eval()
+    tot = {"correct": 0.0, "shuffled": 0.0, "no_image": 0.0}
+    cnt = 0
+    dl = DataLoader(idx, batch_size=bs, collate_fn=make_collate(data, paths, ip, tok, seq, False),
+                    num_workers=2)
+    for b in dl:
+        ids, mask, labels = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
+        if source == "front":
+            v_hat, cl = front(b["pv"].to(dev), b["grid"], b["lens"])
+            vis_list = [v_hat[i, : cl[i]].float() for i in range(len(cl))]
+        else:
+            vis_list = [t.to(dev) for t in b["tgts"]]
+        vis, vm = pad_vis(vis_list, dev)
+        perm = torch.tensor([(i + 1) % len(vis_list) for i in range(len(vis_list))])
+        for key, v, m in (("correct", vis, vm), ("shuffled", vis[perm], vm[perm]), ("no_image", None, None)):
+            if v is None:
+                lg = model(input_ids=ids, attention_mask=mask).logits.float()
+            else:
+                with rotation_context_with(registry, v, m):
+                    lg = model(input_ids=ids, attention_mask=mask).logits.float()
+            tot[key] += F.cross_entropy(lg[:, :-1].reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1)).item()
+        cnt += 1
+    ce = {k: v / max(cnt, 1) for k, v in tot.items()}
+
+    first = full = n = 0
+    for i in idx[:n_acc]:
+        text = data["prompts"][i] + " " + data["answers"][i]
+        tid = tok(text)["input_ids"]
+        a0, na = data["a_rel_start"][i], data["n_answer"][i]
+        if source == "front":
+            o = ip(images=[Image.open(paths[data["ids"][i]]).convert("RGB")], return_tensors="pt")
+            v_hat, cl = front(o["pixel_values"].to(torch.float16).unsqueeze(0).to(dev), o["image_grid_thw"],
+                              [o["pixel_values"].shape[0]])
+            vis = v_hat[:, : cl[0]].float()
+        else:
+            vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
+        vm = torch.ones(1, vis.shape[1], device=dev)
+        with rotation_context_with(registry, vis, vm):
+            lg = model(input_ids=torch.tensor([tid], device=dev)).logits[0].float()
+        preds = [lg[a0 - 1 + k].argmax().item() for k in range(na)]
+        first += int(preds[0] == tid[a0]); full += int(preds == tid[a0 : a0 + na]); n += 1
+    front.train()
+    return {**ce, "gap": ce["shuffled"] - ce["correct"], "tf_first": first / max(n, 1), "tf_full": full / max(n, 1)}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--stage", choices=["oracle", "front_frozen", "joint"], required=True)
+    ap.add_argument("--data", required=True)
+    ap.add_argument("--source", action="append", required=True, help="meta|manifest|img_root（用于解析 id→图片路径）")
+    ap.add_argument("--vrmg-ckpt", required=True)
+    ap.add_argument("--front-ckpt", default="")
+    ap.add_argument("--front-mode", default="rot")
+    ap.add_argument("--multifreq", action="store_true")
+    ap.add_argument("--tokrot", action="store_true")
+    ap.add_argument("--hybrid", action="store_true")
+    ap.add_argument("--prompt-alpha", type=float, default=1.0, help="Prompt 段旋转强度掩码（<1 保留原 LLM 读题能力）")
+    ap.add_argument("--hyb-bound", type=float, default=0.0, help="hybrid 残差相对范数上限（>0 防长序列激活爆炸）")
+    ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
+    ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
+    ap.add_argument("--K", type=int, default=4)
+    ap.add_argument("--lora-rank", type=int, default=16)
+    ap.add_argument("--model", default=f"{B}/zk/model/Qwen3-1.7B")
+    ap.add_argument("--seq", type=int, default=256)
+    ap.add_argument("--bs", type=int, default=8)
+    ap.add_argument("--accum", type=int, default=1, help="梯度累积：每个优化步用 accum 个 bs 大小的微批")
+    ap.add_argument("--steps", type=int, default=2000)
+    ap.add_argument("--lr-vrmg", type=float, default=2e-4)
+    ap.add_argument("--lr-front", type=float, default=1e-4)
+    ap.add_argument("--kd-weight", type=float, default=0.5)
+    ap.add_argument("--kd-temp", type=float, default=2.0)
+    ap.add_argument("--rel-weight", type=float, default=0.1)
+    ap.add_argument("--feat-weight", type=float, default=1.0)
+    ap.add_argument("--arm", choices=["ce", "kd", "rel"], default="rel")
+    ap.add_argument("--n-eval", type=int, default=600)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--student-layers", default="6,13,20,27")
+    ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+    torch.manual_seed(args.seed)
+    dev = "cuda"
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    logf = open(args.out + ".log", "a")
+
+    def log(m):
+        print(m, flush=True); logf.write(m + "\n"); logf.flush()
+
+    paths = {}
+    for s in args.source:
+        paths.update(imgdata.parse_source(s)[1])
+    data = tf.load_data(args.data)
+    n = len(data["ids"])
+    order = list(range(n))
+    random.Random(0).shuffle(order)
+    n_val = max(64, n // 10)
+    val, train = order[:n_val], order[n_val:]
+    val_eval = val[: args.n_eval]
+    random.Random(args.seed).shuffle(train)
+
+    ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
+    tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, device_map=dev,
+                                                 trust_remote_code=True).eval()
+    ck = torch.load(args.vrmg_ckpt, map_location=dev)
+    a1 = ck["args"]
+    layers = [int(x) for x in a1["layers"].split(",") if x]
+    K = 0 if args.front_mode == "none" else args.K
+    pa = args.prompt_alpha if args.prompt_alpha != 1.0 else a1.get("prompt_alpha", 1.0)
+    hb = args.hyb_bound if args.hyb_bound > 0.0 else a1.get("hyb_bound", 0.0)
+    args.prompt_alpha, args.hyb_bound = pa, hb
+    vrmgs, registry = attach_rotation(model, layers, block_size=a1["block"], multifreq=args.multifreq or a1.get("multifreq", False), tokrot=args.tokrot or a1.get("tokrot", False), hybrid=args.hybrid or a1.get("hybrid", False),
+                                      visual_dim=data["vfeat"][0].shape[-1], query_dim=a1["query_dim"],
+                                      wrap_extra=[l for l in range(K) if l not in layers],
+                                      prompt_alpha=pa, hyb_bound=hb,
+                                      qcond=args.qcond or a1.get("qcond", False),
+                                      direct_hyb=args.direct_hyb or a1.get("direct_hyb", False))
+    for m, sd in zip(vrmgs, ck["state"]):
+        m.load_state_dict(sd)
+    front = PatchFront(model, K=K, mode=args.front_mode, vdim=data["vfeat"][0].shape[-1],
+                       lora_rank=args.lora_rank).to(dev)
+    if args.front_ckpt:
+        front.load_state_dict(torch.load(args.front_ckpt, map_location=dev)["front"])
+    log(f"=== joint stage={args.stage} front={args.front_mode} K={K} arm={args.arm} train={len(train)} "
+        f"val={len(val)} eval_n={len(val_eval)} ===")
+    result = {"args": vars(args)}
+    t0 = time.time()
+
+    if args.stage == "joint":
+        fparams = front.trainable_params()
+        vparams = [p for m in vrmgs for p in m.parameters()]
+        freeze_all_but(model, [])
+        for p in fparams + vparams:
+            p.requires_grad_(True)
+        rel_head = None
+        if args.arm == "rel":
+            rel_head = nn.Linear(model.config.hidden_size, data["hidden"][0][0].shape[-1], bias=False).to(dev)
+            if ck.get("rel_head"):
+                rel_head.load_state_dict(ck["rel_head"])
+        groups = [{"params": vparams, "lr": args.lr_vrmg}, {"params": fparams, "lr": args.lr_front}]
+        if rel_head is not None:
+            groups.append({"params": list(rel_head.parameters()), "lr": args.lr_vrmg})
+        opt = torch.optim.AdamW(groups, weight_decay=0.01)
+        base_lrs = [g["lr"] for g in groups]
+        dl = DataLoader(train, batch_size=args.bs, shuffle=True, drop_last=True, num_workers=args.workers,
+                        collate_fn=make_collate(data, paths, ip, tok, args.seq, args.arm != "ce"),
+                        persistent_workers=True)
+        it, step, hist, micro = iter(dl), 0, [], 0
+        all_params = fparams + vparams + (list(rel_head.parameters()) if rel_head is not None else [])
+        while step < args.steps:
+            try:
+                b = next(it)
+            except StopIteration:
+                it = iter(dl); continue
+            if micro == 0:
+                step += 1
+                f = min(1.0, step / 100) * 0.5 * (1 + math.cos(math.pi * min(step, args.steps) / args.steps))
+                for g, bl in zip(opt.param_groups, base_lrs):
+                    g["lr"] = bl * f
+                opt.zero_grad(set_to_none=True)
+            ids, mask, labels = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
+            v_hat, cl = front(b["pv"].to(dev), b["grid"], b["lens"])
+            fl, _ = feature_loss(v_hat, b["tgts"], cl)
+            vis, vm = pad_vis([v_hat[i, : cl[i]] for i in range(len(cl))], dev)
+            with rotation_context_with(registry, vis, vm):
+                out = model(input_ids=ids, attention_mask=mask, output_hidden_states=(args.arm == "rel"))
+            lg = out.logits.float()[:, :-1]
+            ce = F.cross_entropy(lg.reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1))
+            loss = ce + args.feat_weight * fl
+            if args.arm in ("kd", "rel"):
+                k_ids, k_vals, k_mask = b["k_ids"].to(dev), b["k_vals"].to(dev), b["k_mask"].to(dev)
+                full_logp = F.log_softmax(lg / args.kd_temp, dim=-1)
+                stu_k = full_logp.gather(-1, k_ids.clamp(min=0))
+                p_t = F.softmax(k_vals / args.kd_temp, dim=-1)
+                p_rest = (1.0 - p_t.sum(-1)).clamp(min=1e-6)
+                p_s_rest = (1.0 - stu_k.exp().sum(-1)).clamp(min=1e-6)
+                kl = (p_t * (torch.log(p_t.clamp(min=1e-9)) - stu_k)).sum(-1) + p_rest * (torch.log(p_rest) - torch.log(p_s_rest))
+                kd = (kl * k_mask).sum() / k_mask.sum().clamp(min=1.0) * args.kd_temp ** 2
+                loss = loss + args.kd_weight * kd
+                if args.arm == "rel":
+                    terms = []
+                    for li, sl in enumerate([int(x) for x in args.student_layers.split(',')]):
+                        hs = F.normalize(rel_head(out.hidden_states[sl][:, :-1].float()), dim=-1)
+                        th = F.normalize(b["hidden"][li].to(dev).float(), dim=-1)
+                        terms.append(((1.0 - (hs * th).sum(-1)) * k_mask).sum() / k_mask.sum().clamp(min=1.0))
+                    loss = loss + args.rel_weight * torch.stack(terms).mean()
+            (loss / args.accum).backward()
+            hist.append((ce.item(), fl.item()))
+            micro += 1
+            if micro < args.accum:
+                continue
+            micro = 0
+            gn = torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+            opt.step()
+            if step % 50 == 0:
+                h = hist[-50:]
+                log(f"step {step} ce={sum(x[0] for x in h)/50:.4f} feat={sum(x[1] for x in h)/50:.4f} "
+                    f"gn={gn.item():.1f} {(time.time()-t0)/step:.2f}s/it")
+            if step % max(args.steps // 4, 200) == 0 and step < args.steps:
+                ev = joint_eval(model, front, registry, tok, data, val_eval[:160], paths, ip, dev, args.seq, "front",
+                                n_acc=60)
+                log(f"  eval@{step} (front v̂): " + " ".join(f"{k}={v:.4f}" for k, v in ev.items()))
+        result["train_seconds"] = time.time() - t0
+
+    srcs = {"oracle": ["teacher"], "front_frozen": ["front"], "joint": ["front", "teacher"]}[args.stage]
+    result["eval"] = {}
+    for s in srcs:
+        ev = joint_eval(model, front, registry, tok, data, val_eval, paths, ip, dev, args.seq, s)
+        result["eval"][s] = ev
+        log(f"FINAL[{s}] " + " ".join(f"{k}={v:.4f}" for k, v in ev.items()))
+    result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024**3
+    json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
+    if args.stage == "joint":
+        torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": vars(args)},
+                   args.out + ".pt")
+    log("JOINT_DONE")
+
+
+if __name__ == "__main__":
+    main()

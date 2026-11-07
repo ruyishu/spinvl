@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Large model weights, memmaps, and datasets
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.tar
+*.tar.gz
+*.tar.xz
+*.preds.jsonl
+data/
+
+# Queue runtime state
+queue/claims/
+queue/done/
+queue/failed/
+queue/logs/
+queue/pending/
+queue/workers/
+
+# Local environment & credentials
+.env
+*.local.*
+*secret*
