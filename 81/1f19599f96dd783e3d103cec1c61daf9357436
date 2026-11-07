@@ -1,0 +1,51 @@
+paper/references.bib
+  s_2218750ca2fee0::t_710464e40e6446 1-146
+paper/main_cvpr_official.tex
+  s_2218750ca2fee0::t_2bb743bc5b0601 1-58
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_98cc3858c5320c 21-23
+  s_2218750ca2fee0::t_e180aacccda5b9 1-20,24-70,81-82,85-146,155-206,214-215,218,220,227-230,232,247-418
+  s_2218750ca2fee0::t_f5124084a7f371 231
+  s_2218750ca2fee0::t_04822d3ce3b620 207-213,216-217,219,221-226
+  s_2218750ca2fee0::t_915cd08252aea5 147-154
+  s_2218750ca2fee0::t_710d3c23461d01 71-80
+  s_2218750ca2fee0::t_ecf5a69d10c5a0 233-246
+  s_2218750ca2fee0::t_4cb7dd2df49c6c 83-84
+paper/README.md
+  s_2218750ca2fee0::t_e3b455a9e38e5e 1-60
+paper/sections/1_intro.tex
+  s_2218750ca2fee0::t_b9cdfed87c2812 1-120
+paper/sections/0_abstract.tex
+  s_2218750ca2fee0::t_83b77f61209837 1-31
+paper/sections/3_method.tex
+  s_2218750ca2fee0::t_3ef48b9b6e32c4 74
+  s_2218750ca2fee0::t_cc643a5af86c8f 156
+  s_2218750ca2fee0::t_d5671ffeea7c2b 1-73,75-111,116-155,157-202
+  s_2218750ca2fee0::t_c60cf0cb9fda60 112-115
+paper/main.tex
+  s_2218750ca2fee0::t_be01ae00458613 1-63
+paper/sections/5_conclusion.tex
+  s_2218750ca2fee0::t_f0b42a46c944d7 1-57
+paper/sections/2_related.tex
+  s_2218750ca2fee0::t_fa5e83cc8cdca1 1-54
+paper/sections/0_abstract_wide.tex
+  s_2218750ca2fee0::t_d1d95a0a293aad 1-35
+README.md
+  s_2218750ca2fee0::t_9f07d1f178d279 7-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "811f19599f96dd783e3d103cec1c61daf9357436",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "auto(free)"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
