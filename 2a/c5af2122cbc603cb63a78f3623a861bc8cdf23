@@ -1,0 +1,25 @@
+README.md
+  s_2218750ca2fee0::t_f048e4c8085603 1-221
+docs/ARCHITECTURE_AND_CODE_GUIDE.md
+  s_2218750ca2fee0::t_18c1564132daf9 1-85
+FINAL_REPORT.md
+  s_2218750ca2fee0::t_2da2e3f9b39365 1-157
+.gitignore
+  s_2218750ca2fee0::t_76c4aef791ceb9 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "2ac5af2122cbc603cb63a78f3623a861bc8cdf23",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
