@@ -1,0 +1,29 @@
+paper/references.bib
+  s_2218750ca2fee0::t_b6a594030160f6 36-41,44-48
+paper/sections/0_abstract.tex
+  s_2218750ca2fee0::t_6e183ef912cd5f 2-23
+scripts/plot_results.py
+  s_2218750ca2fee0::t_95277628746cfe 1-4,11,15,17,27-32,34,36-37,49,52-53,56-57,60-62,64-65,71,76,78-80,82-83,86,90,97-99,101-106,108,113-121,123,128-133,135,138,142,144-147,149-151,153-155,159,161-162,166,174,180,182-185,187-189,191,201-202,204-207,209,212,219
+  s_2218750ca2fee0::t_e791c1d86a3364 156-157,160,164,172-173,175-178,181,192-193
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_ddde7b30c8b318 244-245
+  s_2218750ca2fee0::t_68ec218285b0e0 104,106-114,116
+  s_2218750ca2fee0::t_08953fb4ff54a7 205-216
+  s_2218750ca2fee0::t_1b380619872085 349,351-358,360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "b622b0f7f0e85e7596c053b55a744b750f495fc1",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
