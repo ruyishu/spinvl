@@ -1,0 +1,21 @@
+scripts/plot_results.py
+  s_2218750ca2fee0::t_d5c2368ff547ef 1-204
+README.md
+  s_2218750ca2fee0::t_27743e9bc7b767 1,3,5-10,12,14,16-24,26-27,31-33,35-46,48,50,52,54,56-59,63,67-70,72-81,83-85,90,93-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "d1e6f22267c81770985ae674fe652a48ad7eaea6",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
