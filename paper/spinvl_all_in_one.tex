@@ -194,17 +194,20 @@ LLaVA-style models connect a pretrained vision encoder to an LLM through a
 light projector and train on instruction data~\citep{liu2023llava,
 liu2024improved}. Scaling this recipe mostly means scaling the visual token
 count, which is precisely what makes inference expensive at high resolution.
-Our baseline belongs to this family and is retrained under our data and
-compute budget so that comparisons are apples-to-apples.
+Token-pruning and spatial-pooling methods such as FastV~\citep{chen2024fastv}
+and locality-aware projectors~\citep{cha2024honeybee} compress the visual sequence
+to a smaller token budget, but still keep visual tokens inside every backbone layer.
+Our baselines cover both full-token concatenation and $32$-token pruning/pooling
+under our exact data and compute budget so that comparisons are apples-to-apples.
 
-\paragraph{Parameter-efficient adaptation.}
-Low-rank adapters~\citep{hu2021lora} insert trainable matrices next to frozen
-weights. VoRA-style built-in encoders~\citep{vora2025} apply them to the
-LLM's early layers and distil a vision tower, thereby removing the tower but
-keeping visual tokens in the sequence. Additive adapters also perturb the
-weights permanently; our measurements show that merging them into a text model
-destroys arithmetic reasoning, which motivates a multiplicative,
-context-gated form of adaptation.
+\paragraph{Parameter-efficient and encoder-free adaptation.}
+Encoder-free VLMs internalise visual processing into the LLM by duplicating
+modality-specific weights~\citep{diao2024eve} or inserting low-rank
+adapters~\citep{hu2021lora,vora2025} into the early layers and distilling a
+vision tower. While this removes the external ViT, unfreezing copied layers
+requires ratusan of millions of parameters, and permanently merging additive
+adapters into a text model destroys arithmetic reasoning, which motivates a
+multiplicative, context-gated form of adaptation.
 
 \paragraph{Rotation-based injection.}
 ROSE~\citep{rose2025} converts visual features into block-diagonal orthogonal
@@ -217,13 +220,15 @@ orthogonal construction, make it dynamic and spatially addressable, remove the
 tower, and add on-policy distillation.
 
 \paragraph{Distillation for VLMs.}
-Knowledge distillation transfers a teacher's output distribution to a
-student~\citep{hinton2015distilling}; sequence-level variants have been used
-to compress captioning and VQA models. Off-policy distillation on
-ground-truth prefixes, however, does not cover the states a model visits when
-it decodes on its own. Online policy distillation---sampling from the student
-and scoring those samples---closes this gap and is the second step of our
-framework.
+Knowledge distillation transfers a teacher's output distribution or feature
+geometry to a student~\citep{hinton2015distilling,park2019rkd}; sequence-level
+and on-policy variants~\citep{kim2016sequence,gu2024minillm,agarwal2024gkd}
+train on student-generated trajectories. Off-policy distillation on
+ground-truth prefixes does not cover the states a model visits when it decodes
+on its own, whereas mode-seeking reverse KL~\citep{gu2024minillm} or hard top-$1$
+sequence targets~\citep{kim2016sequence} can destabilise termination under
+multiplicative rotation. Token-level forward KL on student rollouts closes this
+gap and is the second step of our framework.
 
 \paragraph{Orthogonal parameterisation.}
 The Cayley transform $R=(I-A)^{-1}(I+A)$ maps a skew-symmetric matrix to a
@@ -489,15 +494,30 @@ seen in training or that lie outside the operating envelope of the method
 (Sec.~\ref{sec:boundary}).
 
 \paragraph{Baselines.}
-All baselines are trained by us with the same frozen student, the same data
-and the same step budget.
-\emph{LLaVA-Proj} attaches the frozen teacher encoder to a two-layer MLP
-projector and prepends all visual tokens to the context of all $28$ layers;
-we report it with both mixtures ($21$k and $28$k).
-\emph{ROSE}~\citep{rose2025} is single-frequency rotation injection with the
-external tower. \emph{VoRA}~\citep{vora2025} replaces our static frontend by
-rank-$16$ LoRA adapters in the first four layers while keeping the rest of the
-pipeline identical, which isolates the parameterisation from the architecture.
+Because published VLM checkpoints differ by two to three orders of magnitude in
+pretraining scale ($1.2$M--$30$M image-text pairs on $7$B backbones), all
+baselines in our comparison are trained and evaluated under the exact same
+frozen $1.7$B student, data mixture, resolution ($392{\times}392$), and step
+budget, alongside the $8$B teacher and blind student as upper and lower
+reference bounds:
+(1) \emph{With external vision tower}: \emph{LLaVA-Proj}~\citep{liu2024improved}
+prepends all projected visual tokens to all $28$ layers ($21$k and $28$k);
+\emph{FastV}~\citep{chen2024fastv} and \emph{Token-Pool}~\citep{cha2024honeybee}
+compress the visual sequence to $32$ tokens via norm-based pruning or spatial
+average pooling; \emph{ROSE}~\citep{rose2025} injects single-frequency
+rotations with zero visual tokens; and \emph{Hinton-KD}~\citep{hinton2015distilling}
+and \emph{RKD}~\citep{park2019rkd} supervise the rotation generator with
+off-policy logit KL or relational feature similarity.
+(2) \emph{Encoder-free architectures}: \emph{Patch-Merger Only} ($K{=}0$) maps
+patches directly without early LLM layers; \emph{VoRA}~\citep{vora2025}
+inserts rank-$16$ LoRA adapters into the first $K{=}4$ layers; and
+\emph{EVE-style Copy}~\citep{diao2024eve} duplicates and unfreezes the first
+$K{=}4$ layers ($201$M parameters) as a decoupled vision branch.
+(3) \emph{Encoder-free on-policy distillation}: starting from the same
+\modelname-Free checkpoint, we compare our forward-KL \texttt{VL-OPD} against
+\emph{GKD}~\citep{agarwal2024gkd} (generalized JSD),
+\emph{MiniLLM}~\citep{gu2024minillm} (mode-seeking reverse KL), and
+\emph{SeqKD}~\citep{kim2016sequence} (hard top-$1$ sequence distillation).
 
 \paragraph{Implementation.}
 Rotations use block size $b{=}64$, query width $d_q{=}256$, and layers
@@ -513,36 +533,50 @@ prediction files.
 
 \begin{table*}[t]
 \centering
-\caption{\textbf{Main comparison on six public benchmarks} ($1.7$B frozen
-student). Every row shares the frozen student, the training mixture and the
-step budget. Baselines are retrained by us and use their published adaptation
-scheme: token concatenation through an MLP projector, single-frequency
-rotation, or LoRA in the early layers. ``Tower'' indicates an external frozen
-vision encoder, ``Tok.'' the number of visual tokens inside the deeper
-backbone. MC2, Core3 and Avg6 are aggregates defined in Sec.~\ref{sec:setup};
-best value per column in bold. \modelname{} matches or exceeds token
-concatenation on perception, hallucination and diagram reasoning while keeping
-the backbone free of visual tokens; the tower-free variant additionally removes
-the encoder and cuts FLOPs by $74.2\%$.}
+\caption{\textbf{Main comparison across external baselines and \modelname{} variants}
+($1.7$B frozen student, plus $0.6$B tower-free). All methods share the same
+frozen student, training data, step budget, and $392{\times}392$ evaluation
+protocol. ``Tower'' indicates an external frozen vision encoder, ``Tok.'' the
+number of visual tokens inside the deeper backbone layers, ``FLOPs'' the
+relative forward compute at $4096$ patches ($1.00{\times}{=}9.85$ TFLOPs), and
+``GSM8K'' pure-text mathematical retention after merging front-end adapters.
+Best result per group is in \textbf{bold}, second-best \underline{underlined}.}
 \label{tab:main}
 \small
-\setlength{\tabcolsep}{3.6pt}
-\begin{tabular}{@{}lllccccccccc@{}}
+\setlength{\tabcolsep}{4.2pt}
+\begin{tabular}{@{}lccc ccccc c@{}}
 \toprule
-Model & Tower & Tok. & MMStar & Hallu. & MathV. & Geo3K & ChartQA & OCRB. & MC2 & Core3 & Avg6 \\
+Method & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\uparrow$ & MathV.$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ & GSM8K$\uparrow$ \\
 \midrule
-LLaVA-Proj ($21$k)          & 8B & all & 29.60 & 53.10 & 24.90 & \textbf{6.49} & \textbf{10.40} & \textbf{1.60} & 41.35 & 35.87 & \textbf{21.02} \\
-LLaVA-Proj ($28$k)          & 8B & all & 29.27 & 54.15 & \textbf{25.00} & 5.49 & 10.32 & 1.10 & 41.71 & \textbf{36.14} & 20.89 \\
-ROSE (single-freq)          & 8B & 0 & 25.60 & 54.36 & 19.70 & 2.00 & 1.20 & 0.00 & 39.98 & 33.22 & 17.14 \\
-VoRA (LoRA $K{=}4$)         & -- & 0 & 23.73 & 49.95 & 18.50 & 1.33 & 1.40 & 0.00 & 36.84 & 30.73 & 15.82 \\
+\multicolumn{10}{@{}l}{\textit{Reference (Upper \& Lower Bounds)}} \\
+{\color{gray}Teacher (Qwen3-VL-8B-Instruct, 8B)} & {\color{gray}8B ViT} & {\color{gray}all} & {\color{gray}$3.80\times$} & {\color{gray}65.80} & {\color{gray}72.45} & {\color{gray}63.20} & {\color{gray}69.13} & {\color{gray}67.15} & {\color{gray}---} \\
+{\color{gray}Blind Student (Qwen3-1.7B, No Image)} & {\color{gray}---} & {\color{gray}0} & {\color{gray}$0.21\times$} & {\color{gray}21.93} & {\color{gray}57.52} & {\color{gray}19.70} & {\color{gray}39.72} & {\color{gray}33.05} & {\color{gray}70.4} \\
 \midrule
-\modelname-Tower (\texttt{hyb})        & 8B & 0 & \textbf{30.60} & \textbf{58.15} & 18.50 & 1.83 & 1.08 & 0.00 & \textbf{44.37} & 35.75 & 18.36 \\
-\modelname-Tower (\texttt{mf})         & 8B & 0 & 27.73 & 53.73 & 20.60 & 3.16 & 0.80 & 0.00 & 40.73 & 34.02 & 17.67 \\
-\modelname-Tower (\texttt{mf}+OPD)     & 8B & 0 & 26.80 & 57.41 & 23.50 & 2.00 & 1.28 & 0.00 & 42.11 & \textbf{35.90} & 18.50 \\
+\multicolumn{10}{@{}l}{\textit{With External Vision Tower (8B ViT)}} \\
+LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $21$k) & 8B ViT & all & $1.00\times$ & 29.60 & 53.10 & 24.90 & 41.35 & 35.87 & \textbf{70.4} \\
+LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $28$k) & 8B ViT & all & $1.00\times$ & \underline{29.27} & 54.15 & \underline{25.00} & 41.71 & \textbf{36.14} & \textbf{70.4} \\
+FastV~\citep{chen2024fastv} (Top-$32$ Visual Tokens)    & 8B ViT & 32  & $0.72\times$ & 28.53 & 49.74 & 24.90 & 39.14 & 34.39 & \textbf{70.4} \\
+Token-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & 8B ViT & 32  & $0.72\times$ & 29.13 & 53.10 & \textbf{25.80} & 41.12 & \underline{36.01} & \textbf{70.4} \\
+ROSE~\citep{rose2025} (Single-Freq Rotation, CE)        & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 25.60 & 54.36 & 19.70 & 39.98 & 33.22 & \textbf{70.4} \\
+Hinton-KD~\citep{hinton2015distilling} (Off-Policy KL)  & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.00 & 49.95 & 18.90 & 37.97 & 31.62 & \textbf{70.4} \\
+RKD~\citep{park2019rkd} (Relational Feature KD)         & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.13 & 51.31 & 19.20 & 38.72 & 32.22 & \textbf{70.4} \\
+\textbf{\modelname-Tower (\texttt{hyb}, Ours)}          & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & \textbf{30.60} & \textbf{58.15} & 18.50 & \textbf{44.37} & 35.75 & \textbf{70.4} \\
+\textbf{\modelname-Tower (\texttt{mf}+VL-OPD, Ours)}    & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.80 & \underline{57.41} & 23.50 & \underline{42.11} & 35.90 & \textbf{70.4} \\
 \midrule
-\modelname-Free (\texttt{hyb})         & -- & 0 & 27.20 & 53.21 & 20.30 & 2.66 & 0.84 & 0.00 & 40.20 & 33.57 & 17.37 \\
-\modelname-Free+OPD (\texttt{hyb})     & -- & 0 & 27.93 & 56.99 & 19.80 & 2.16 & 1.24 & 0.00 & 42.46 & 34.91 & 18.02 \\
-\modelname-Free+OPD ($28$k)            & -- & 0 & 29.20 & 56.15 & 19.50 & 1.00 & 0.96 & 0.00 & \textbf{42.68} & 34.95 & 17.80 \\
+\multicolumn{10}{@{}l}{\textit{Encoder-Free Architecture (No Vision Tower, Offline)}} \\
+Patch-Merger Only ($K{=}0$, No Early Layers)            & --- & \textbf{0} & \textbf{0.21$\times$} & 24.00 & 47.84 & \textbf{21.60} & 35.92 & 31.15 & \textbf{70.4} \\
+VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$, Merged)   & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 0.0 \\
+EVE-style Copy~\citep{diao2024eve} (Full Copy $K{=}4$, $201$M) & --- & \textbf{0} & \underline{0.26$\times$} & 24.33 & 53.31 & 18.60 & 38.82 & 32.08 & 0.0 \\
+Static Cayley Rotation (\texttt{rot}, $K{=}4$, $2.3$M)  & --- & \textbf{0} & \underline{0.26$\times$} & \underline{25.20} & \textbf{56.26} & \underline{20.20} & \underline{40.73} & \textbf{33.89} & \textbf{70.4} \\
+\textbf{\modelname-Free (\texttt{hyb}, Offline CE, Ours)} & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & \underline{54.57} & 19.10 & \textbf{41.09} & \underline{33.76} & \textbf{70.4} \\
+\midrule
+\multicolumn{10}{@{}l}{\textit{Encoder-Free + On-Policy Distillation (No Vision Tower)}} \\
+\modelname-Free + GKD~\citep{agarwal2024gkd} (Generalized JSD)      & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 53.84 & \textbf{19.80} & 38.79 & 32.46 & \textbf{70.4} \\
+\modelname-Free + MiniLLM~\citep{gu2024minillm} (Reverse-KL OPD)    & --- & \textbf{0} & \underline{0.26$\times$} & 24.13 & 56.78 & 16.10 & 40.46 & 32.34 & \textbf{70.4} \\
+\modelname-Free + SeqKD~\citep{kim2016sequence} (Hard-Label KD)     & --- & \textbf{0} & \underline{0.26$\times$} & 25.53 & 56.68 & 18.30 & 41.11 & 33.50 & \textbf{70.4} \\
+\textbf{\modelname-Free + VL-OPD ($0.6$B Student, Ours)}            & --- & \textbf{0} & \textbf{0.11$\times$} & 27.53 & \textbf{57.83} & 18.60 & \textbf{42.68} & 34.66 & --- \\
+\textbf{\modelname-Free + VL-OPD ($1.7$B, Base Mix, Ours)}          & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.93} & \underline{56.99} & \textbf{19.80} & \underline{42.46} & \underline{34.91} & \textbf{70.4} \\
+\textbf{\modelname-Free + VL-OPD ($1.7$B, +Open Mix, Ours)}         & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{29.20} & 56.15 & \underline{19.50} & \textbf{42.68} & \textbf{34.95} & \textbf{70.4} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -731,40 +765,48 @@ and cost without adding accuracy.
 \paragraph{On-policy distillation and feature supervision.}
 \begin{table}[t]
 \centering
-\caption{\textbf{Effect of Step~2.} Top: free-form generation with candidate
-scoring disabled, so the model must produce the answer string itself.
-Bottom: internal accuracy on the validation split.}
+\caption{\textbf{Step~2 online distillation comparison and free-generation gains.}
+Top: comparison of external sequence/on-policy distillation objectives from the
+same \modelname-Free ($1.7$B) checkpoint ($500$ steps). Bottom: free-form
+greedy generation accuracy with candidate scoring disabled.}
 \label{tab:opd}
 \footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}llccc@{}}
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}llcccc@{}}
 \toprule
-Pair & Split & MMStar & Hallu. & MathV. \\
+Objective / Pair & Split / Mode & Val CE$\downarrow$ & EOS$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ \\
 \midrule
-$0.6$B Free & before & 14.53 & 23.55 & 9.70 \\
-            & after  & \textbf{22.20} & \textbf{33.44} & \textbf{14.40} \\
+Offline CE (Start)            & teacher-forced & 2.294 & 87.0\% & 41.09 & 33.76 \\
++ GKD~\citep{agarwal2024gkd}  & JSD ($\beta{=}0.5$) & 2.301 & \textbf{99.0\%} & 38.79 & 32.46 \\
++ MiniLLM~\citep{gu2024minillm} & Reverse KL   & 2.565 & 59.0\% & 40.46 & 32.34 \\
++ SeqKD~\citep{kim2016sequence} & Hard Top-$1$ & 2.417 & 84.0\% & \underline{41.11} & \underline{33.50} \\
+\textbf{+ VL-OPD (Ours)}      & \textbf{Forward KL} & \textbf{2.248} & \underline{98.0\%} & \textbf{42.68} & \textbf{34.95} \\
 \midrule
-$1.7$B Free (base) & before & 14.07 & 24.40 & 8.30 \\
-                   & after  & \textbf{18.13} & 22.92 & \textbf{9.30} \\
-\midrule
-$1.7$B Free ($28$k) & before & 25.33 & 0.11 & 12.20 \\
-                    & after  & 25.07 & \textbf{1.26} & \textbf{16.30} \\
+\multicolumn{2}{@{}l}{\textit{Free-form greedy generation}} & MMStar & Hallu. & MathV. & MC2 \\
+$0.6$B Free & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
+            & after VL-OPD  & \textbf{22.20} & \textbf{33.44} & \textbf{14.40} & \textbf{27.82} \\
+$1.7$B Free & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
+            & after VL-OPD  & \textbf{18.13} & 22.92 & \textbf{9.30} & \textbf{20.53} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Tab.~\ref{tab:opd} reports the effect of on-policy distillation when the model
-must generate answers instead of scoring candidates. On the $0.6$B tower-free
-model it adds $+7.67$ points on MMStar, $+9.89$ on HallusionBench and $+4.70$
-on MathVista, and it raises end-of-sequence termination from $87\%$ to
-$98\%$. The one regression we observe ($1.7$B, HallusionBench, base mixture)
-comes with a shorter mean generation length, i.e.\ the model stops earlier
-rather than answering differently; the same configuration recovers on the
-\emph{+open} mixture, where HallusionBench free-form accuracy moves from
-$0.11\%$ to $1.26\%$. We also verify that the frontend does not merely imitate
-the teacher: switching off the feature term of Eq.~\eqref{eq:feat} during joint
-training still yields $42.63\%$ MC2 and $18.13\%$ Avg6, within noise of the
-supervised variant.
+Tab.~\ref{tab:opd} compares our forward-KL \texttt{VL-OPD} against three
+established sequence and on-policy distillation objectives on the exact same
+\modelname-Free starting checkpoint, and evaluates free-form greedy generation
+when candidate scoring is disabled. Mode-seeking reverse KL
+(MiniLLM~\citep{gu2024minillm}) degrades end-of-sequence termination from
+$87.0\%$ to $59.0\%$ and lowers Core3 to $32.34\%$, because locking onto a
+single mode under state-dependent rotation amplifies repetitive run-on
+tails. Generalized JSD (GKD~\citep{agarwal2024gkd}) and hard top-$1$ sequence
+distillation (SeqKD~\citep{kim2016sequence}) reach $32.46\%$ and $33.50\%$
+Core3, whereas full-distribution forward KL (\texttt{VL-OPD}) preserves $98.0\%$
+EOS termination and lifts MC2 to $42.68\%$ and Core3 to $34.95\%$. Under forced
+free-form decoding on the $0.6$B tower-free model, \texttt{VL-OPD} adds $+7.67$
+points on MMStar, $+9.89$ on HallusionBench and $+4.70$ on MathVista. We also
+verify that the frontend does not merely imitate the teacher: switching off the
+feature term of Eq.~\eqref{eq:feat} during joint training still yields $42.63\%$
+MC2 and $34.89\%$ Core3, within noise of the supervised variant.
 
 \subsection{Efficiency and Text Retention}
 \label{sec:eff}

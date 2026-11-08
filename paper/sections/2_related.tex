@@ -6,17 +6,20 @@ LLaVA-style models connect a pretrained vision encoder to an LLM through a
 light projector and train on instruction data~\citep{liu2023llava,
 liu2024improved}. Scaling this recipe mostly means scaling the visual token
 count, which is precisely what makes inference expensive at high resolution.
-Our baseline belongs to this family and is retrained under our data and
-compute budget so that comparisons are apples-to-apples.
+Token-pruning and spatial-pooling methods such as FastV~\citep{chen2024fastv}
+and locality-aware projectors~\citep{cha2024honeybee} compress the visual sequence
+to a smaller token budget, but still keep visual tokens inside every backbone layer.
+Our baselines cover both full-token concatenation and $32$-token pruning/pooling
+under our exact data and compute budget so that comparisons are apples-to-apples.
 
-\paragraph{Parameter-efficient adaptation.}
-Low-rank adapters~\citep{hu2021lora} insert trainable matrices next to frozen
-weights. VoRA-style built-in encoders~\citep{vora2025} apply them to the
-LLM's early layers and distil a vision tower, thereby removing the tower but
-keeping visual tokens in the sequence. Additive adapters also perturb the
-weights permanently; our measurements show that merging them into a text model
-destroys arithmetic reasoning, which motivates a multiplicative,
-context-gated form of adaptation.
+\paragraph{Parameter-efficient and encoder-free adaptation.}
+Encoder-free VLMs internalise visual processing into the LLM by duplicating
+modality-specific weights~\citep{diao2024eve} or inserting low-rank
+adapters~\citep{hu2021lora,vora2025} into the early layers and distilling a
+vision tower. While this removes the external ViT, unfreezing copied layers
+requires ratusan of millions of parameters, and permanently merging additive
+adapters into a text model destroys arithmetic reasoning, which motivates a
+multiplicative, context-gated form of adaptation.
 
 \paragraph{Rotation-based injection.}
 ROSE~\citep{rose2025} converts visual features into block-diagonal orthogonal
@@ -29,13 +32,15 @@ orthogonal construction, make it dynamic and spatially addressable, remove the
 tower, and add on-policy distillation.
 
 \paragraph{Distillation for VLMs.}
-Knowledge distillation transfers a teacher's output distribution to a
-student~\citep{hinton2015distilling}; sequence-level variants have been used
-to compress captioning and VQA models. Off-policy distillation on
-ground-truth prefixes, however, does not cover the states a model visits when
-it decodes on its own. Online policy distillation---sampling from the student
-and scoring those samples---closes this gap and is the second step of our
-framework.
+Knowledge distillation transfers a teacher's output distribution or feature
+geometry to a student~\citep{hinton2015distilling,park2019rkd}; sequence-level
+and on-policy variants~\citep{kim2016sequence,gu2024minillm,agarwal2024gkd}
+train on student-generated trajectories. Off-policy distillation on
+ground-truth prefixes does not cover the states a model visits when it decodes
+on its own, whereas mode-seeking reverse KL~\citep{gu2024minillm} or hard top-$1$
+sequence targets~\citep{kim2016sequence} can destabilise termination under
+multiplicative rotation. Token-level forward KL on student rollouts closes this
+gap and is the second step of our framework.
 
 \paragraph{Orthogonal parameterisation.}
 The Cayley transform $R=(I-A)^{-1}(I+A)$ maps a skew-symmetric matrix to a

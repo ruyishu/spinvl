@@ -84,6 +84,8 @@ def main():
     ap.add_argument("--min-new", type=int, default=1)
     ap.add_argument("--gen-temp", type=float, default=0.7)
     ap.add_argument("--kd-temp", type=float, default=1.0)
+    ap.add_argument("--kl-mode", choices=["fwd", "rev", "jsd", "seqkd"], default="fwd",
+                    help="在线蒸馏散度类型：fwd=Forward KL(Ours), rev=Reverse KL(MiniLLM), jsd=JSD(GKD), seqkd=Hard Top-1(SeqKD)")
     ap.add_argument("--ce-weight", type=float, default=0.5)
     ap.add_argument("--feat-weight", type=float, default=0.2)
     ap.add_argument("--prompt-alpha", type=float, default=1.0, help="Prompt 段旋转强度掩码（<1 保留原 LLM 读题能力）")
@@ -246,7 +248,18 @@ def main():
             na = len(g)
             t_logp = F.log_softmax(tlog[k, Lp - 1 : Lp - 1 + na].float() / T, dim=-1)
             s_logp = F.log_softmax(s_lg[k, :na] / T, dim=-1)
-            kl_terms.append((t_logp.exp() * (t_logp - s_logp)).sum(-1).mean())
+            if args.kl_mode == "fwd":
+                kl_terms.append((t_logp.exp() * (t_logp - s_logp)).sum(-1).mean())
+            elif args.kl_mode == "rev":
+                s_p = s_logp.exp()
+                kl_terms.append((s_p * (s_logp - t_logp)).sum(-1).mean())
+            elif args.kl_mode == "jsd":
+                t_p, s_p = t_logp.exp(), s_logp.exp()
+                m_logp = torch.log(0.5 * (t_p + s_p).clamp(min=1e-12))
+                kl_terms.append((0.5 * (t_p * (t_logp - m_logp)).sum(-1) + 0.5 * (s_p * (s_logp - m_logp)).sum(-1)).mean())
+            elif args.kl_mode == "seqkd":
+                t_top = t_logp.argmax(dim=-1)
+                kl_terms.append(F.nll_loss(s_logp, t_top) / (T ** 2))
 
         loss = torch.stack(kl_terms).mean() * (T ** 2) if kl_terms else torch.tensor(0.0, device=dev)
         if args.ce_weight > 0:

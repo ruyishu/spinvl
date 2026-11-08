@@ -65,11 +65,20 @@ class Runner:
         })
         self.ip = AutoProcessor.from_pretrained(teacher, trust_remote_code=True).image_processor
         self.vdim = AutoConfig.from_pretrained(teacher, trust_remote_code=True).text_config.hidden_size
+        self.registry, self.front, self.vision, self.proj = {}, None, None, None
+        if mode == "teacher":
+            from transformers import AutoModelForImageTextToText
+            self.proc = AutoProcessor.from_pretrained(teacher, trust_remote_code=True)
+            self.proc.tokenizer.padding_side = "left"
+            self.model = AutoModelForImageTextToText.from_pretrained(teacher, dtype=torch.bfloat16, device_map=dev,
+                                                                     trust_remote_code=True).eval()
+            freeze_all_but(self.model, [])
+            self.arch = {"teacher": True}
+            return
         self.model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16, device_map=dev,
                                                           trust_remote_code=True).eval()
         freeze_all_but(self.model, [])
         ck = torch.load(ckpt, map_location=dev)
-        self.registry, self.front, self.vision, self.proj = {}, None, None, None
         if mode in ("tower", "tower_free"):
             if mode == "tower":
                 a1, ja, K, front_mode = ck["args"], {}, 0, "none"
@@ -103,13 +112,13 @@ class Runner:
                                         lora_rank=ja.get("lora_rank", 16)).to(dev)
                 self.front.load_state_dict(ck["front"])
                 self.front.eval()
-        elif mode == "proj":
+        elif mode in ("proj", "proj_pool32", "proj_fastv32"):
             from train_proj import Proj
             self.vision = load_vision_tower(teacher, dev)
             self.proj = Proj(self.vdim, self.model.config.hidden_size).to(dev).float()
             self.proj.load_state_dict(ck["proj"])
             self.proj.eval()
-            self.arch = {"proj": True}
+            self.arch = {"proj": mode}
         else:
             raise ValueError(mode)
 
@@ -141,18 +150,37 @@ class Runner:
 
     @torch.no_grad()
     def generate(self, prompts, images, max_new=24, items=None, bench=None, force_gen=False):
-        pv, grid, lens = self._pix(images)
         pids = [self.tok(p)["input_ids"] for p in prompts]
         pad = max(len(x) for x in pids)
         attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=self.dev)
         is_mc = [False if force_gen else bool(items and items[k].get("choices")) for k in range(len(prompts))]
         need_gen = (not items) or any(not m for m in is_mc)
-        if self.mode == "proj":
+        if self.mode == "teacher":
+            texts = [topd.VISION_PREFIX + p for p in prompts]
+            enc = self.proc(text=texts, images=images, return_tensors="pt", padding=True)
+            enc = {k: (v.to(self.dev) if torch.is_tensor(v) else v) for k, v in enc.items()}
+            Lp = enc["input_ids"].shape[1]
+            lg = self.model(**enc).logits[:, -1, :].float() if any(is_mc) else None
+            tails = []
+            if need_gen:
+                gkw = dict(**enc, max_new_tokens=max_new, do_sample=False,
+                           no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
+                if items and bench in ("chartqa", "mathvista", "geometry3k") and not force_gen:
+                    gkw["logits_processor"] = LogitsProcessorList([FirstStepBanLetterProcessor(Lp, self.step0_ban_ids)])
+                gen = self.model.generate(**gkw)
+                tails = [g[Lp:] for g in gen]
+        elif self.mode in ("proj", "proj_pool32", "proj_fastv32"):
+            pv, grid, lens = self._pix(images)
             feats = self._vision_feats(pv, grid, lens)
             emb = self.model.get_input_embeddings()
             rows, masks = [], []
             for k, ids in enumerate(pids):
                 v = self.proj(feats[k]).to(self.model.dtype)
+                if self.mode == "proj_pool32" and v.shape[0] > 32:
+                    v = torch.nn.functional.adaptive_avg_pool1d(v.float().T.unsqueeze(0), 32).squeeze(0).T.to(v.dtype)
+                elif self.mode == "proj_fastv32" and v.shape[0] > 32:
+                    idx_top = v.float().norm(dim=-1).topk(32).indices.sort().values
+                    v = v[idx_top]
                 t = emb(torch.tensor(ids, device=self.dev))
                 padt = torch.zeros(pad - len(ids), t.shape[-1], device=self.dev, dtype=t.dtype)
                 rows.append(torch.cat([padt, v, t], dim=0))
@@ -170,6 +198,7 @@ class Runner:
                                           no_repeat_ngram_size=3, pad_token_id=self.pad_id, eos_token_id=self.stops)
                 tails = [g for g in gen]
         else:
+            pv, grid, lens = self._pix(images)
             if self.mode == "tower":
                 feats = self._vision_feats(pv, grid, lens)
             else:

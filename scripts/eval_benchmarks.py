@@ -16,7 +16,7 @@ ROOT = bd.B + "/zk/project/rose-distill"
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["tower", "tower_free", "proj"])
+    ap.add_argument("--mode", choices=["tower", "tower_free", "proj", "proj_pool32", "proj_fastv32", "teacher"])
     ap.add_argument("--ckpt")
     ap.add_argument("--name")
     ap.add_argument("--model", default=f"{bd.B}/zk/model/Qwen3-1.7B")
