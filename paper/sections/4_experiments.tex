@@ -86,46 +86,46 @@ prediction files.
 ($1.7$B frozen student, plus $0.6$B tower-free). All methods share the same
 frozen student, training data, step budget, and $392{\times}392$ evaluation
 protocol. ``Tower'' indicates an external frozen vision encoder, ``Tok.'' the
-number of visual tokens inside the deeper backbone layers, ``FLOPs'' the
-relative forward compute at $4096$ patches ($1.00{\times}{=}9.85$ TFLOPs), and
-``GSM8K'' pure-text mathematical retention after merging front-end adapters.
-Best result per group is in \textbf{bold}, second-best \underline{underlined}.}
+number of visual tokens inside the deeper backbone layers, and ``FLOPs'' the
+relative forward compute at $4096$ patches ($1.00{\times}{=}9.85$ TFLOPs).
+MC2, Core3 and Avg6 are defined in Sec.~\ref{sec:setup}; best result per group
+is in \textbf{bold}, second-best \underline{underlined}.}
 \label{tab:main}
 \small
-\setlength{\tabcolsep}{4.2pt}
+\setlength{\tabcolsep}{4.4pt}
 \begin{tabular}{@{}lccc ccccc c@{}}
 \toprule
-Method & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\uparrow$ & MathV.$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ & GSM8K$\uparrow$ \\
+Method & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\uparrow$ & MathV.$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ & Avg6$\uparrow$ \\
 \midrule
 \multicolumn{10}{@{}l}{\textit{Reference (Upper \& Lower Bounds)}} \\
-{\color{gray}Teacher (Qwen3-VL-8B-Instruct, 8B)} & {\color{gray}8B ViT} & {\color{gray}all} & {\color{gray}$3.80\times$} & {\color{gray}65.80} & {\color{gray}72.45} & {\color{gray}63.20} & {\color{gray}69.13} & {\color{gray}67.15} & {\color{gray}---} \\
-{\color{gray}Blind Student (Qwen3-1.7B, No Image)} & {\color{gray}---} & {\color{gray}0} & {\color{gray}$0.21\times$} & {\color{gray}21.93} & {\color{gray}57.52} & {\color{gray}19.70} & {\color{gray}39.72} & {\color{gray}33.05} & {\color{gray}70.4} \\
+{\color{gray}Teacher (Qwen3-VL-8B-Instruct, 8B)} & {\color{gray}8B ViT} & {\color{gray}all} & {\color{gray}$3.80\times$} & {\color{gray}65.80} & {\color{gray}72.45} & {\color{gray}63.20} & {\color{gray}69.13} & {\color{gray}67.15} & {\color{gray}59.03} \\
+{\color{gray}Blind Student (Qwen3-1.7B, No Image)} & {\color{gray}---} & {\color{gray}0} & {\color{gray}$0.21\times$} & {\color{gray}21.93} & {\color{gray}57.52} & {\color{gray}19.70} & {\color{gray}39.72} & {\color{gray}33.05} & {\color{gray}16.53} \\
 \midrule
 \multicolumn{10}{@{}l}{\textit{With External Vision Tower (8B ViT)}} \\
-LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $21$k) & 8B ViT & all & $1.00\times$ & 29.60 & 53.10 & 24.90 & 41.35 & 35.87 & \textbf{70.4} \\
-LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $28$k) & 8B ViT & all & $1.00\times$ & \underline{29.27} & 54.15 & \underline{25.00} & 41.71 & \textbf{36.14} & \textbf{70.4} \\
-FastV~\citep{chen2024fastv} (Top-$32$ Visual Tokens)    & 8B ViT & 32  & $0.72\times$ & 28.53 & 49.74 & 24.90 & 39.14 & 34.39 & \textbf{70.4} \\
-Token-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & 8B ViT & 32  & $0.72\times$ & 29.13 & 53.10 & \textbf{25.80} & 41.12 & \underline{36.01} & \textbf{70.4} \\
-ROSE~\citep{rose2025} (Single-Freq Rotation, CE)        & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 25.60 & 54.36 & 19.70 & 39.98 & 33.22 & \textbf{70.4} \\
-Hinton-KD~\citep{hinton2015distilling} (Off-Policy KL)  & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.00 & 49.95 & 18.90 & 37.97 & 31.62 & \textbf{70.4} \\
-RKD~\citep{park2019rkd} (Relational Feature KD)         & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.13 & 51.31 & 19.20 & 38.72 & 32.22 & \textbf{70.4} \\
-\textbf{\modelname-Tower (\texttt{hyb}, Ours)}          & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & \textbf{30.60} & \textbf{58.15} & 18.50 & \textbf{44.37} & 35.75 & \textbf{70.4} \\
-\textbf{\modelname-Tower (\texttt{mf}+VL-OPD, Ours)}    & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.80 & \underline{57.41} & 23.50 & \underline{42.11} & 35.90 & \textbf{70.4} \\
+LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $21$k) & 8B ViT & all & $1.00\times$ & 29.60 & 53.10 & 24.90 & 41.35 & 35.87 & \underline{21.02} \\
+LLaVA-Proj~\citep{liu2024improved} (Full Tokens, $28$k) & 8B ViT & all & $1.00\times$ & \underline{29.27} & 54.15 & \underline{25.00} & 41.71 & \textbf{36.14} & 20.89 \\
+FastV~\citep{chen2024fastv} (Top-$32$ Visual Tokens)    & 8B ViT & 32  & $0.72\times$ & 28.53 & 49.74 & 24.90 & 39.14 & 34.39 & 19.43 \\
+Token-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & 8B ViT & 32  & $0.72\times$ & 29.13 & 53.10 & \textbf{25.80} & 41.12 & \underline{36.01} & \textbf{21.06} \\
+ROSE~\citep{rose2025} (Single-Freq Rotation, CE)        & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 25.60 & 54.36 & 19.70 & 39.98 & 33.22 & 17.14 \\
+Hinton-KD~\citep{hinton2015distilling} (Off-Policy KL)  & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.00 & 49.95 & 18.90 & 37.97 & 31.62 & 16.43 \\
+RKD~\citep{park2019rkd} (Relational Feature KD)         & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.13 & 51.31 & 19.20 & 38.72 & 32.22 & 16.70 \\
+\textbf{\modelname-Tower (\texttt{hyb}, Ours)}          & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & \textbf{30.60} & \textbf{58.15} & 18.50 & \textbf{44.37} & 35.75 & 18.36 \\
+\textbf{\modelname-Tower (\texttt{mf}+VL-OPD, Ours)}    & 8B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.80 & \underline{57.41} & 23.50 & \underline{42.11} & 35.90 & 18.50 \\
 \midrule
 \multicolumn{10}{@{}l}{\textit{Encoder-Free Architecture (No Vision Tower, Offline)}} \\
-Patch-Merger Only ($K{=}0$, No Early Layers)            & --- & \textbf{0} & \textbf{0.21$\times$} & 24.00 & 47.84 & \textbf{21.60} & 35.92 & 31.15 & \textbf{70.4} \\
-VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$, Merged)   & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 0.0 \\
-EVE-style Copy~\citep{diao2024eve} (Full Copy $K{=}4$, $201$M) & --- & \textbf{0} & \underline{0.26$\times$} & 24.33 & 53.31 & 18.60 & 38.82 & 32.08 & 0.0 \\
-Static Cayley Rotation (\texttt{rot}, $K{=}4$, $2.3$M)  & --- & \textbf{0} & \underline{0.26$\times$} & \underline{25.20} & \textbf{56.26} & \underline{20.20} & \underline{40.73} & \textbf{33.89} & \textbf{70.4} \\
-\textbf{\modelname-Free (\texttt{hyb}, Offline CE, Ours)} & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & \underline{54.57} & 19.10 & \textbf{41.09} & \underline{33.76} & \textbf{70.4} \\
+Patch-Merger Only ($K{=}0$, No Early Layers)            & --- & \textbf{0} & \textbf{0.21$\times$} & 24.00 & 47.84 & \textbf{21.60} & 35.92 & 31.15 & 15.81 \\
+VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$)           & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 15.82 \\
+EVE-style Copy~\citep{diao2024eve} (Full Copy $K{=}4$, $201$M) & --- & \textbf{0} & \underline{0.26$\times$} & 24.33 & 53.31 & 18.60 & 38.82 & 32.08 & 16.80 \\
+Static Cayley Rotation (\texttt{rot}, $K{=}4$, $2.3$M)  & --- & \textbf{0} & \underline{0.26$\times$} & \underline{25.20} & \textbf{56.26} & \underline{20.20} & \underline{40.73} & \textbf{33.89} & \underline{17.55} \\
+\textbf{\modelname-Free (\texttt{hyb}, Offline CE, Ours)} & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & \underline{54.57} & 19.10 & \textbf{41.09} & \underline{33.76} & \textbf{17.58} \\
 \midrule
 \multicolumn{10}{@{}l}{\textit{Encoder-Free + On-Policy Distillation (No Vision Tower)}} \\
-\modelname-Free + GKD~\citep{agarwal2024gkd} (Generalized JSD)      & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 53.84 & \textbf{19.80} & 38.79 & 32.46 & \textbf{70.4} \\
-\modelname-Free + MiniLLM~\citep{gu2024minillm} (Reverse-KL OPD)    & --- & \textbf{0} & \underline{0.26$\times$} & 24.13 & 56.78 & 16.10 & 40.46 & 32.34 & \textbf{70.4} \\
-\modelname-Free + SeqKD~\citep{kim2016sequence} (Hard-Label KD)     & --- & \textbf{0} & \underline{0.26$\times$} & 25.53 & 56.68 & 18.30 & 41.11 & 33.50 & \textbf{70.4} \\
-\textbf{\modelname-Free + VL-OPD ($0.6$B Student, Ours)}            & --- & \textbf{0} & \textbf{0.11$\times$} & 27.53 & \textbf{57.83} & 18.60 & \textbf{42.68} & 34.66 & --- \\
-\textbf{\modelname-Free + VL-OPD ($1.7$B, Base Mix, Ours)}          & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.93} & \underline{56.99} & \textbf{19.80} & \underline{42.46} & \underline{34.91} & \textbf{70.4} \\
-\textbf{\modelname-Free + VL-OPD ($1.7$B, +Open Mix, Ours)}         & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{29.20} & 56.15 & \underline{19.50} & \textbf{42.68} & \textbf{34.95} & \textbf{70.4} \\
+\modelname-Free + GKD~\citep{agarwal2024gkd} (Generalized JSD)      & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 53.84 & \textbf{19.80} & 38.79 & 32.46 & 17.01 \\
+\modelname-Free + MiniLLM~\citep{gu2024minillm} (Reverse-KL OPD)    & --- & \textbf{0} & \underline{0.26$\times$} & 24.13 & 56.78 & 16.10 & 40.46 & 32.34 & 16.75 \\
+\modelname-Free + SeqKD~\citep{kim2016sequence} (Hard-Label KD)     & --- & \textbf{0} & \underline{0.26$\times$} & 25.53 & 56.68 & 18.30 & 41.11 & 33.50 & 17.44 \\
+\textbf{\modelname-Free + VL-OPD ($0.6$B Student, Ours)}            & --- & \textbf{0} & \textbf{0.11$\times$} & 27.53 & \textbf{57.83} & 18.60 & \textbf{42.68} & 34.66 & \textbf{18.05} \\
+\textbf{\modelname-Free + VL-OPD ($1.7$B, Base Mix, Ours)}          & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.93} & \underline{56.99} & \textbf{19.80} & \underline{42.46} & \underline{34.91} & \underline{18.02} \\
+\textbf{\modelname-Free + VL-OPD ($1.7$B, +Open Mix, Ours)}         & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{29.20} & 56.15 & \underline{19.50} & \textbf{42.68} & \textbf{34.95} & 17.80 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -248,23 +248,21 @@ forced free-form greedy generation.}
 \caption{\textbf{Frontend parameterisation.} Rows are grouped by training arm
 because the four frontend modes were trained under two different rotation
 initialisations; comparisons are made only within a group (see text). ``Val
-CE'' and ``1st/Full'' are internal validation numbers on the base mixture; the
-last column merges the frontend into the text layers and measures GSM8K.
-Rotation with scaling is the only variant that is both accurate and safe to
-merge-free.}
+CE'' and ``1st/Full'' are internal validation numbers on the base mixture;
+``MC2'', ``Core3'' and ``Avg6'' are public benchmark aggregates.}
 \label{tab:front}
 \footnotesize
-\setlength{\tabcolsep}{2.6pt}
+\setlength{\tabcolsep}{2.8pt}
 \begin{tabular}{@{}llcccccc@{}}
 \toprule
-Frontend & Arm & Params & Val CE$\downarrow$ & 1st/Full & MC2 & Core3 & GSM8K \\
+Frontend & Arm & Params & Val CE$\downarrow$ & 1st/Full & MC2$\uparrow$ & Core3$\uparrow$ & Avg6$\uparrow$ \\
 \midrule
-none ($K{=}0$)     & rel & 0     & 5.237 & 24.0/16.0 & 35.92 & 31.15 & 70.4 \\
-rot                & rel & 2.32M & 1.973 & 40.7/17.3 & \textbf{40.73} & \textbf{33.89} & \textbf{70.4} \\
-full copy          & rel & 201M  & 1.745 & 43.3/20.0 & 38.82 & 32.08 & 0.0 \\
+none ($K{=}0$)     & rel & 0     & 5.237 & 24.0/16.0 & 35.92 & 31.15 & 15.81 \\
+rot                & rel & 2.32M & 1.973 & 40.7/17.3 & \textbf{40.73} & \textbf{33.89} & \textbf{17.55} \\
+full copy          & rel & 201M  & 1.745 & 43.3/20.0 & 38.82 & 32.08 & 16.80 \\
 \midrule
-LoRA ($r{=}16$)    & ce  & 3.74M & 1.532 & 44.7/18.7 & 36.84 & 30.73 & 0.0 \\
-\textbf{rot+scale (\texttt{rots})} & ce & \textbf{2.40M} & 1.554 & 43.3/16.0 & \textbf{38.14} & \textbf{31.32} & \textbf{70.4} \\
+LoRA ($r{=}16$)    & ce  & 3.74M & 1.532 & 44.7/18.7 & 36.84 & 30.73 & 15.82 \\
+\textbf{rot+scale (\texttt{rots})} & ce & \textbf{2.40M} & 1.554 & 43.3/16.0 & \textbf{38.14} & \textbf{31.32} & \textbf{16.12} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -273,13 +271,13 @@ LoRA ($r{=}16$)    & ce  & 3.74M & 1.532 & 44.7/18.7 & 36.84 & 30.73 & 0.0 \\
 Tab.~\ref{tab:front} and Fig.~\ref{fig:abl}(a) isolate the four ways of turning
 the first $K$ layers into an encoder. Two groups were trained under different rotation
 initialisations, so we compare inside each group. Within the first group, pure
-rotation reaches $40.73\%$ MC2 with $2.32$M parameters, ahead of copying the
-layers ($38.82\%$, $201$M) and of dropping the layers entirely
-($35.92\%$): the frozen layers do the encoding work, and doing it with an
-orthogonal transform is both cheaper and better than unfreezing copies. Within
-the second group, rotation with channel scaling is ahead of rank-$16$ LoRA on
-MC2 ($38.14$ vs.\ $36.84$), Core3 ($31.32$ vs.\ $30.73$) and Avg6, while
-keeping GSM8K at $70.4\%$ against $0.0\%$ once the adapter is merged. The
+rotation reaches $40.73\%$ MC2 and $17.55\%$ Avg6 with $2.32$M parameters,
+ahead of copying the layers ($38.82\%$, $201$M) and of dropping the layers
+entirely ($35.92\%$): the frozen layers do the encoding work, and doing it with
+an orthogonal transform is both cheaper and better than unfreezing copies.
+Within the second group, rotation with channel scaling is ahead of rank-$16$
+LoRA on MC2 ($38.14$ vs.\ $36.84$), Core3 ($31.32$ vs.\ $30.73$) and Avg6
+($16.12$ vs.\ $15.82$) with $36\%$ fewer parameters ($2.40$M vs.\ $3.74$M). The
 margin over LoRA is thus smaller than the margin our full pipeline shows in
 Tab.~\ref{tab:main}, and we attribute the difference to the deep tier and to
 distillation rather than to the frontend alone. Finally, adding the deep
