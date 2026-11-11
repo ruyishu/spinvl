@@ -22,7 +22,7 @@
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
 
-\graphicspath{{figures/}{./}}
+\graphicspath{{figures/}}
 \setlength{\columnsep}{0.31in}
 \renewcommand{\arraystretch}{1.05}
 
@@ -577,6 +577,7 @@ Avg6 are defined in Sec.~\ref{sec:setup}; best result per block is in
 \label{tab:main}
 \small
 \setlength{\tabcolsep}{3.8pt}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}lcccc ccccc c@{}}
 \toprule
 Method & Mix & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\uparrow$ & MathV.$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ & Avg6$\uparrow$ \\
@@ -617,7 +618,7 @@ VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$ + \texttt{mf}, \texttt{ce} init) & 
 \textbf{\modelname-Free + VL-OPD ($1.7$B, Base Mix, $s{=}0$, Ours)}  & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.93} & \underline{56.99} & \textbf{19.80} & \underline{42.46} & \textbf{34.91} & \underline{18.02} \\
 \textbf{\modelname-Free + VL-OPD ($0.6$B, +Open Mix, $s{=}0$, Ours)} & $28$k & --- & \textbf{0} & \textbf{0.11$\times$} & \underline{27.53} & \textbf{57.83} & \underline{18.60} & \textbf{42.68} & \underline{34.66} & \textbf{18.05} \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table*}
 
 \begin{figure*}[t]
@@ -684,7 +685,8 @@ students do not benefit, since the frozen backbone is not the bottleneck.
 All single-run rows use $s{=}0$, and $3$-seed rows average $s\in\{0,1,2\}$.}
 \label{tab:scale}
 \footnotesize
-\setlength{\tabcolsep}{2.6pt}
+\setlength{\tabcolsep}{2.4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}llcccccc@{}}
 \toprule
 Scale & Model (Mix, Seed) & MMStar & Hallu. & MathV. & MC2 & Core3 & Avg6 \\
@@ -703,7 +705,7 @@ $8$B   & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 25.67 & 54.15 & 19.90 & 39.91
 $8$B   & Free (\texttt{hyb}, $28$k, $s{=}0$)     & 24.80 & \textbf{56.99} & 19.20 & \textbf{40.90} & \textbf{33.66} & \textbf{17.50} \\
 $8$B   & Free+OPD ($28$k, $s{=}0$)               & \textbf{27.40} & 53.31 & 18.10 & 40.36 & 32.94 & 16.91 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
 Tab.~\ref{tab:scale} reports the same pipelines with $0.6$B and $8$B students,
@@ -747,6 +749,7 @@ the held-out validation split.}
 \label{tab:front}
 \footnotesize
 \setlength{\tabcolsep}{2.2pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}lllccccccc@{}}
 \toprule
 Frontend & Arm & Deep & Params & Val CE$\downarrow$ & Gap$\uparrow$ & 1st/Full & MC2$\uparrow$ & Core3$\uparrow$ & Avg6$\uparrow$ \\
@@ -761,7 +764,7 @@ LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 
 \textbf{\texttt{rots}} & ce & mf  & \textbf{2.40M} & 1.549 & \textbf{1.783} & 43.3/17.3 & \textbf{41.32} & \textbf{33.55} & \textbf{17.33} \\
 \textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.21 & \textbf{33.57} & \textbf{17.37} \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
 \paragraph{Frontend parameterisation (Sec.~\ref{sec:abl}).}
@@ -788,7 +791,8 @@ $3$-seed mean at $K{=}4$). Grounding gap is the cross-entropy difference
 between shuffled and correctly paired validation images.}
 \label{tab:depth}
 \footnotesize
-\setlength{\tabcolsep}{3.4pt}
+\setlength{\tabcolsep}{3.0pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
 $K$ & Params & CE$\downarrow$ & Gap$\uparrow$ & 1st$\uparrow$ & MC2 & Core3 & Avg6 \\
@@ -799,7 +803,7 @@ $2$ ($s{=}0$)         & 1.20M  & \textbf{2.267} & 0.815 & 36.7 & 41.30 & 33.93 &
 \textbf{$4$ ($3$ seeds)} & \textbf{2.40M} & 2.329 & \textbf{1.150} & 35.8 & 40.36 & 33.24 & 17.27 \\
 $6$ ($s{=}0$)         & 3.59M  & 2.272 & 0.978 & \textbf{38.0} & 41.94 & 33.90 & 17.66 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 Tab.~\ref{tab:depth} varies $K$ on the $28$k +open mixture. On the validation
 split, the visual grounding gap rises sharply from $0.387$ at $K{=}0$ to $0.896$
@@ -819,7 +823,8 @@ same \modelname-Free ($1.7$B) checkpoint ($500$ steps). Bottom: free-form
 greedy generation accuracy with candidate scoring disabled.}
 \label{tab:opd}
 \footnotesize
-\setlength{\tabcolsep}{3.2pt}
+\setlength{\tabcolsep}{2.8pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}llcccc@{}}
 \toprule
 Objective / Pair & Split / Mode & Val CE$\downarrow$ & EOS$\uparrow$ & MC2$\uparrow$ & Core3$\uparrow$ \\
@@ -836,7 +841,7 @@ $0.6$B Free & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
 $1.7$B Free & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
             & after VL-OPD  & \textbf{18.13} & 22.92 & \textbf{9.30} & \textbf{20.53} \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
 Tab.~\ref{tab:opd} compares our forward-KL \texttt{VL-OPD} against three
@@ -958,6 +963,7 @@ derangement ($0$ same-image pairs).}
 \label{tab:grounding}
 \footnotesize
 \setlength{\tabcolsep}{2.2pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}lcccccc@{}}
 \toprule
 Model ($44$k Debiased, $s{=}0$) & Val Gap$\uparrow$ & MMStar & Hallu. & MathV. & MC2 & Core3 \\
@@ -974,7 +980,7 @@ VoRA (LoRA $K{=}4$)            & \textbf{0.556} & \textbf{28.4}/28.3 & 51.8/53.7
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$)} & 0.384 & 26.3/24.7 & 55.3/56.7 & \textbf{20.2}/21.4 & 40.82 & \textbf{33.95} \\
 \textbf{+ Online JSD (Frozen, EM $18{\to}23\%$)} & 0.381 & 26.3/25.9 & 55.0/56.8 & 20.0/18.5 & 40.66 & 33.78 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
 Our benchmarks mix two very different demands. Perception, hallucination and
