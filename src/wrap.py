@@ -9,6 +9,7 @@ from vrmg import LayerVRMG, RotatedLinear
 
 _CTX = None
 _STATIC = None
+_STORAGE_CTX = {}
 
 ATTN_PROJS = ("q_proj", "k_proj", "v_proj", "o_proj")
 MLP_PROJS = ("gate_proj", "up_proj", "down_proj")
@@ -20,10 +21,13 @@ def set_static(module):
 
 
 @contextmanager
-def rotation_context_with(registry, visual, visual_mask=None):
+def rotation_context_with(registry, visual, visual_mask=None, ans_start=None, text_mask=None):
     global _CTX
     prev = _CTX
-    _CTX = {"visual": visual, "mask": visual_mask, "cache": {}, "modules": registry}
+    if prev is None:
+        _STORAGE_CTX.clear()
+    _CTX = {"visual": visual, "mask": visual_mask, "ans_start": ans_start, "text_mask": text_mask,
+            "cache": {}, "modules": registry}
     try:
         yield
     finally:
@@ -48,11 +52,22 @@ class RotatedProj(nn.Module):
     def forward(self, x):
         if _STATIC is not None:
             return _STATIC.apply(self.layer_id, self.proj_name, self.rot.base, x)
-        if _CTX is None or self.layer_id not in _CTX["modules"]:
-            return self.rot.base(x)
-        cache = _CTX["cache"]
-        if self.layer_id not in cache:
-            cache[self.layer_id] = _CTX["modules"][self.layer_id](_CTX["visual"], _CTX["mask"], x)
+        ctx = _CTX
+        replay = False
+        if ctx is None:
+            if x.requires_grad and torch.is_grad_enabled():
+                ctx = _STORAGE_CTX.get(x.untyped_storage().data_ptr())
+                replay = ctx is not None
+            if ctx is None or self.layer_id not in ctx["modules"]:
+                return self.rot.base(x)
+        else:
+            if self.layer_id not in ctx["modules"]:
+                return self.rot.base(x)
+            _STORAGE_CTX[x.untyped_storage().data_ptr()] = ctx
+        cache = ctx["cache"]
+        if self.layer_id not in cache or (replay and self.proj_name == "q_proj"):
+            cache[self.layer_id] = ctx["modules"][self.layer_id](
+                ctx["visual"], ctx["mask"], x, ctx.get("ans_start"), ctx.get("text_mask"))
         entry = cache[self.layer_id]
         return self.rot(x, entry[self.proj_name], entry.get("gate"), entry.get("tokrot"),
                         entry.get("hybrid"), entry.get("cfg"))

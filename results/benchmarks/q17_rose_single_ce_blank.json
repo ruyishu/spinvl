@@ -1,0 +1,147 @@
+{
+  "name": "q17_rose_single_ce_blank",
+  "mode": "tower",
+  "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p2/p2_ce_n21000_s0_pt.pt",
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "arch": {
+    "layers": [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24
+    ],
+    "block": 64,
+    "multifreq": false,
+    "tokrot": false,
+    "hybrid": false,
+    "qcond": false,
+    "direct_hyb": false,
+    "front_mode": "none",
+    "K": 0,
+    "prompt_alpha": 1.0,
+    "hyb_bound": 0.0
+  },
+  "args": {
+    "mode": "tower",
+    "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p2/p2_ce_n21000_s0_pt.pt",
+    "name": "q17_rose_single_ce_blank",
+    "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+    "benches": "mmstar,hallusion,mathvista",
+    "limit": 0,
+    "bs": 8,
+    "max_pixels": 153664,
+    "max_new": 24,
+    "image_ctrl": "blank",
+    "force_gen": false,
+    "flags": "",
+    "prompt_alpha": null,
+    "hyb_bound": null,
+    "out_dir": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/bench_eval_v4",
+    "selftest": false,
+    "check_data": false
+  },
+  "benches": {
+    "mmstar": {
+      "n": 1500,
+      "hits": 407,
+      "acc": 0.2713333333333333,
+      "ci95": [
+        0.24943636032375685,
+        0.29439857548331216
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "coarse perception": {
+          "n": 250,
+          "acc": 0.316
+        },
+        "fine-grained perception": {
+          "n": 250,
+          "acc": 0.208
+        },
+        "instance reasoning": {
+          "n": 250,
+          "acc": 0.264
+        },
+        "logical reasoning": {
+          "n": 250,
+          "acc": 0.308
+        },
+        "math": {
+          "n": 250,
+          "acc": 0.288
+        },
+        "science & technology": {
+          "n": 250,
+          "acc": 0.244
+        }
+      },
+      "cal_acc": 0.2525117213663764,
+      "eos_stop_rate": 1.0,
+      "avg_gen_tokens": 2.857142857142857,
+      "rep3_rate": 0.0,
+      "seconds": 42.75722789764404
+    },
+    "hallusion": {
+      "n": 951,
+      "hits": 517,
+      "acc": 0.5436382754994742,
+      "ci95": [
+        0.5118685522897948,
+        0.5750568602603077
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "VD": {
+          "n": 591,
+          "acc": 0.5194585448392555
+        },
+        "VS": {
+          "n": 360,
+          "acc": 0.5833333333333334
+        }
+      },
+      "cal_acc": 0.5173501577287066,
+      "seconds": 29.0799880027771
+    },
+    "mathvista": {
+      "n": 1000,
+      "hits": 207,
+      "acc": 0.207,
+      "ci95": [
+        0.18303250886513583,
+        0.23321005370648906
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "free_form/float": {
+          "n": 40,
+          "acc": 0.0
+        },
+        "free_form/integer": {
+          "n": 418,
+          "acc": 0.050239234449760764
+        },
+        "free_form/list": {
+          "n": 2,
+          "acc": 0.0
+        },
+        "multi_choice/text": {
+          "n": 540,
+          "acc": 0.34444444444444444
+        }
+      },
+      "cal_acc": 0.3314814814814815,
+      "eos_stop_rate": 1.0,
+      "avg_gen_tokens": 2.739130434782609,
+      "rep3_rate": 0.0,
+      "seconds": 69.60545206069946
+    }
+  },
+  "seconds": 146.0052628517151,
+  "peak_gib": 6.098946571350098,
+  "note": "对齐训练格式的规则判分（选择题/判断题用候选对数似然，开放题贪心解码+防复读）；图片缩放到 ≤max_pixels"
+}

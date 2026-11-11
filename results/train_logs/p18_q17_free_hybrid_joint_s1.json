@@ -1,0 +1,60 @@
+{
+ "args": {
+  "stage": "joint",
+  "data": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/geo_8b.pt",
+  "source": [
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/geo_8b.pt|/data/ibu-bi-ai-share-disk/zk/project/mm-opsd/data/processed-mv/geometry3k_train.jsonl|/data/ibu-bi-ai-share-disk/zk/project/mm-opsd/data/processed-mv"
+  ],
+  "vrmg_ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p18/p18_q17_tower_hybrid_ce_s1_pt.pt",
+  "front_ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p6/p6_rots_K4.pt",
+  "front_mode": "rots",
+  "multifreq": false,
+  "tokrot": false,
+  "hybrid": true,
+  "prompt_alpha": 1.0,
+  "hyb_bound": 0.0,
+  "qcond": false,
+  "direct_hyb": false,
+  "K": 4,
+  "lora_rank": 16,
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "seq": 256,
+  "bs": 8,
+  "accum": 1,
+  "steps": 3200,
+  "lr_vrmg": 0.0002,
+  "lr_front": 0.0001,
+  "kd_weight": 0.5,
+  "kd_temp": 2.0,
+  "rel_weight": 0.1,
+  "feat_weight": 1.0,
+  "arm": "ce",
+  "n_eval": 600,
+  "seed": 1,
+  "student_layers": "6,13,20,27",
+  "workers": 3,
+  "out": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p18/p18_q17_free_hybrid_joint_s1"
+ },
+ "train_seconds": 1588.8527636528015,
+ "eval": {
+  "front": {
+   "correct": 2.247612717151642,
+   "shuffled": 3.3173150793711343,
+   "no_image": 10.940094305674235,
+   "gap": 1.0697023622194926,
+   "tf_first": 0.37333333333333335,
+   "tf_full": 0.16666666666666666
+  },
+  "teacher": {
+   "correct": 2.495856617291768,
+   "shuffled": 3.454505449930827,
+   "no_image": 10.940094305674235,
+   "gap": 0.9586488326390588,
+   "tf_first": 0.32666666666666666,
+   "tf_full": 0.15333333333333332
+  }
+ },
+ "peak_gib": 29.69899845123291
+}

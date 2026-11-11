@@ -31,6 +31,64 @@ STUDENT_LAYERS = [6, 13, 20, 27]
 TEACHER_LAYERS = [8, 16, 24, 32]
 
 
+def split_train_val_by_image(data, paths=None, n_val=0, seed=0):
+    """按图像内容哈希（优先 img_sha1 -> 真实图片文件字节 SHA1 -> 视觉特征 SHA1）分组切分，确保同图绝不跨 train/val。"""
+    import hashlib
+    n = len(data["ids"])
+    n_val = n_val or max(64, n // 10)
+    groups = {}
+    path_sha_cache = {}
+    img_sha_list = data.get("img_sha1")
+    has_vfeat = "vfeat" in data and len(data["vfeat"]) == n
+    for i, rid in enumerate(data["ids"]):
+        if img_sha_list and i < len(img_sha_list) and img_sha_list[i]:
+            key = f"sha1:{img_sha_list[i]}"
+        elif paths and rid in paths:
+            rp = os.path.realpath(paths[rid])
+            if rp not in path_sha_cache:
+                if os.path.exists(rp):
+                    path_sha_cache[rp] = "file_sha1:" + hashlib.sha1(open(rp, "rb").read()).hexdigest()
+                else:
+                    path_sha_cache[rp] = f"path:{os.path.normpath(paths[rid])}"
+            key = path_sha_cache[rp]
+        elif has_vfeat:
+            vf = data["vfeat"][i]
+            h = hashlib.sha1()
+            h.update(str(tuple(vf.shape)).encode())
+            h.update(np.ascontiguousarray(vf[:4].numpy()).tobytes())
+            h.update(np.ascontiguousarray(vf[-4:].numpy()).tobytes())
+            key = f"vfeat_sha1:{h.hexdigest()}"
+        else:
+            key = f"__sample__{rid}"
+        groups.setdefault(key, []).append(i)
+    keys = sorted(groups)
+    random.Random(0).shuffle(keys)
+    val, train, val_groups, train_groups = [], [], set(), set()
+    for key in keys:
+        if len(val) < min(n_val, n - 1):
+            val.extend(groups[key])
+            val_groups.add(key)
+        else:
+            train.extend(groups[key])
+            train_groups.add(key)
+    assert train and val, "按图切分后 train 或 val 为空"
+    assert not (train_groups & val_groups), "train/val 存在共享图片组"
+    random.Random(seed).shuffle(train)
+    return train, val, {"train_rows": len(train), "val_rows": len(val),
+                        "train_groups": len(train_groups), "val_groups": len(val_groups),
+                        "group_overlap": len(train_groups & val_groups)}
+
+
+def topk_conditional_kl(student_logits, topk_ids, topk_vals, mask, temperature=2.0):
+    """top-k 截断教师分布与学生同一候选集上的条件 KL，不含伪造的 rest 概率桶。"""
+    s_logits = student_logits.gather(-1, topk_ids.clamp(min=0)) / temperature
+    t_logits = topk_vals / temperature
+    s_logp = F.log_softmax(s_logits, dim=-1)
+    t_logp = F.log_softmax(t_logits, dim=-1)
+    kl = (t_logp.exp() * (t_logp - s_logp)).sum(-1)
+    return (kl * mask).sum() / mask.sum().clamp(min=1.0) * (temperature ** 2)
+
+
 def collate(batch_idx, data, tok, max_seq, need_teacher):
     eos = tok.eos_token or ""
     eos_id = tok.convert_tokens_to_ids(eos) if eos else None
@@ -88,13 +146,14 @@ def eval_losses(model, registry, tok, val, data, max_seq, dev, bs=8, n_batches=8
         ids, mask, labels, vis, vmask, *_ = collate(batch, data, tok, max_seq, False)
         ids, mask, labels = ids.to(dev), mask.to(dev), labels.to(dev)
         vis, vmask = vis.to(dev), vmask.to(dev)
+        a0_list = [data["a_rel_start"][i] for i in batch]
         perm = torch.tensor([(i + 1) % len(batch) for i in range(len(batch))])
         for key, v, vm in (("correct", vis, vmask), ("shuffled", vis[perm], vmask[perm]),
                            ("no_image", None, None)):
             if v is None:
                 lg = model(input_ids=ids, attention_mask=mask).logits.float()
             else:
-                with rotation_context_with(registry, v, vm):
+                with rotation_context_with(registry, v, vm, ans_start=a0_list, text_mask=mask):
                     lg = model(input_ids=ids, attention_mask=mask).logits.float()
             tot[key] += F.cross_entropy(lg[:, :-1].reshape(-1, lg.shape[-1]),
                                         labels[:, 1:].reshape(-1)).item()
@@ -173,7 +232,7 @@ def load_data(path):
         return data
     metas = [torch.load(p, map_location="cpu") for p in paths]
     merged = {k: [] for k in ("ids", "prompts", "answers", "a_rel_start", "n_answer", "topk_ids",
-                              "topk_vals", "vlen")}
+                              "topk_vals", "vlen", "img_sha1")}
     merged["hidden"] = [[] for _ in metas[0]["hidden"]]
     lazies = []
     for m in metas:
@@ -181,6 +240,8 @@ def load_data(path):
             if k == "hidden":
                 for li, h in enumerate(m["hidden"]):
                     merged["hidden"][li] += h
+            elif k == "img_sha1":
+                merged["img_sha1"] += m.get("img_sha1", [None] * len(m["ids"]))
             else:
                 merged[k] += m[k]
         lazies.append(LazyFeats(m["feat_bin"], m["voff"], m["vlen"], m["vdim"]) if "feat_bin" in m else m["vfeat"])
@@ -198,7 +259,7 @@ def eval_tf_acc(model, registry, tok, data, idx, dev):
         a0, na = data["a_rel_start"][i], data["n_answer"][i]
         vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
         vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
+        with rotation_context_with(registry, vis, vm, ans_start=[a0], text_mask=torch.ones(1, len(ids), device=dev)):
             lg = model(input_ids=torch.tensor([ids], device=dev)).logits[0].float()
         preds = [lg[a0 - 1 + k].argmax().item() for k in range(na)]
         first += int(preds[0] == ids[a0])
@@ -229,6 +290,8 @@ def main():
     ap.add_argument("--kd-weight", type=float, default=0.5)
     ap.add_argument("--kd-temp", type=float, default=2.0)
     ap.add_argument("--rel-weight", type=float, default=0.1)
+    ap.add_argument("--gnd-weight", type=float, default=0.0, help="带梯度的同 batch 错图对比损失权重（>0 启用）")
+    ap.add_argument("--gnd-margin", type=float, default=0.75, help="首答案 token 错图与真图 NLL 边际阈值（nat，建议 0.5~1.0）")
     ap.add_argument("--eval-every", type=int, default=200)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
@@ -236,19 +299,18 @@ def main():
     ap.add_argument("--em-n", type=int, default=60)
     ap.add_argument("--test-data", default="")
     ap.add_argument("--test-em-n", type=int, default=150)
+    ap.add_argument("--init-ckpt", default="", help="可选：从已有 VRMG 权重热启动继续微调")
     ap.add_argument("--result-json", default="")
     ap.add_argument("--log", required=True)
     args = ap.parse_args()
 
     data = load_data(args.data)
+    if args.arm in ("kd", "rel") and ("mix_v2" in args.data or "nat_supp" in args.data):
+        raise ValueError("mix_v2 / nat_supp 改写了题干与选项顺序，不能直接跑依赖旧 token 对齐的离线 kd/rel 臂！")
     n = len(data["ids"])
-    order = list(range(n))
-    random.Random(0).shuffle(order)  # 验证集划分固定，跨 seed 可比
-    n_val = max(64, n // 10)
-    val, train = order[:n_val], order[n_val:]
+    train, val, split_info = split_train_val_by_image(data, None, seed=args.seed)
     if args.limit:
         train = train[: args.limit]
-    random.Random(args.seed).shuffle(train)  # seed 只影响训练顺序与初始化
     torch.manual_seed(args.seed)
 
     dev = "cuda"
@@ -261,6 +323,10 @@ def main():
                                       visual_dim=data["vfeat"][0].shape[-1], query_dim=args.query_dim,
                                       prompt_alpha=args.prompt_alpha, hyb_bound=args.hyb_bound,
                                       qcond=args.qcond, direct_hyb=args.direct_hyb)
+    if args.init_ckpt and os.path.exists(args.init_ckpt):
+        ick = torch.load(args.init_ckpt, map_location=dev)
+        for m, sd in zip(vrmgs, ick["state"]):
+            m.load_state_dict(sd, strict=False)
     params = [p for m in vrmgs for p in m.parameters()]
     rel_head = None
     if args.arm == "rel":
@@ -275,7 +341,7 @@ def main():
     def log(m):
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
-    log(f"=== {args.arm} train={len(train)} val={len(val)} vrmg={len(vrmgs)} "
+    log(f"=== {args.arm} train={len(train)} val={len(val)} vrmg={len(vrmgs)} split={split_info} "
         f"trainable={n_train/1e6:.1f}M block={args.block} kd_w={args.kd_weight} T={args.kd_temp} ===")
 
     # 对齐自检：老师 top-1 命中 gold 的比例
@@ -292,30 +358,45 @@ def main():
         opt, lambda s: min(1.0, (s + 1) / 50) * 0.5 * (1 + math.cos(math.pi * min(s, args.steps) / args.steps)))
 
     t0 = time.time()
-    ce_h, kd_h, rel_h = [], [], []
+    ce_h, kd_h, rel_h, gnd_h = [], [], [], []
     for step in range(1, args.steps + 1):
         batch = [train[(step * args.bs + i) % len(train)] for i in range(args.bs)]
         ids, mask, labels, vis, vmask, k_ids, k_vals, k_mask, hidden = collate(
             batch, data, tok, args.seq, args.arm != "ce")
         ids, mask, labels = ids.to(dev), mask.to(dev), labels.to(dev)
         vis, vmask = vis.to(dev), vmask.to(dev)
-        with rotation_context_with(registry, vis, vmask):
+        a0_list = [data["a_rel_start"][i] for i in batch]
+        with rotation_context_with(registry, vis, vmask, ans_start=a0_list, text_mask=mask):
             out = model(input_ids=ids, attention_mask=mask, output_hidden_states=(args.arm == "rel"))
         lg = out.logits.float()[:, :-1]
         ce = F.cross_entropy(lg.reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1))
-        loss, kd_v, rel_v = ce, 0.0, 0.0
+        loss, kd_v, rel_v, gnd_v = ce, 0.0, 0.0, 0.0
+
+        if args.gnd_weight > 0.0 and len(batch) >= 2:
+            perm = torch.tensor([(j + 1) % len(batch) for j in range(len(batch))], device=dev)
+            # 错图分支保持梯度开启（不加 no_grad），同时对真图产生正向拉力、对错图产生反向推力
+            with rotation_context_with(registry, vis[perm], vmask[perm], ans_start=a0_list, text_mask=mask):
+                out_shuf = model(input_ids=ids, attention_mask=mask)
+            lg_shuf = out_shuf.logits.float()[:, :-1]
+            # 跳过 Qwen3 数字答案的前导纯空格 token 220 (' ')，直接监督第一个实质内容/数字 token
+            p0_list = []
+            for j, i in enumerate(batch):
+                a0 = data["a_rel_start"][i]
+                if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
+                    a0 = a0 + 1
+                p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
+            p0 = torch.tensor(p0_list, device=dev)
+            b_idx = torch.arange(len(batch), device=dev)
+            y0 = ids[b_idx, p0 + 1]
+            nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
+            nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
+            gnd = F.relu(args.gnd_margin - (nll_shuf - nll_real)).mean()
+            loss = loss + args.gnd_weight * gnd
+            gnd_v = gnd.item()
 
         if args.arm in ("kd", "rel"):
             k_ids_g, k_vals_g, k_mask_g = k_ids.to(dev), k_vals.to(dev), k_mask.to(dev)
-            full_logp = F.log_softmax(lg / args.kd_temp, dim=-1)
-            stu_k = full_logp.gather(-1, k_ids_g.clamp(min=0))
-            p_t = F.softmax(k_vals_g / args.kd_temp, dim=-1)
-            p_rest = (1.0 - p_t.sum(-1)).clamp(min=1e-6)
-            p_s_rest = (1.0 - stu_k.exp().sum(-1)).clamp(min=1e-6)
-            kl_tok = (p_t * (torch.log(p_t.clamp(min=1e-9)) - stu_k)).sum(-1) \
-                     + p_rest * (torch.log(p_rest) - torch.log(p_s_rest))
-            m = k_mask_g
-            kd = (kl_tok * m).sum() / m.sum().clamp(min=1.0) * (args.kd_temp ** 2)
+            kd = topk_conditional_kl(lg, k_ids_g, k_vals_g, k_mask_g, args.kd_temp)
             loss = loss + args.kd_weight * kd
             kd_v = kd.item()
 
@@ -338,10 +419,12 @@ def main():
         ce_h.append(ce.item())
         if kd_v: kd_h.append(kd_v)
         if rel_v: rel_h.append(rel_v)
+        if gnd_v: gnd_h.append(gnd_v)
         if step % 50 == 0:
             log(f"step {step} ce={sum(ce_h[-50:])/50:.4f} "
                 f"kd={sum(kd_h[-50:])/max(len(kd_h[-50:]),1):.3f} "
-                f"rel={sum(rel_h[-50:])/max(len(rel_h[-50:]),1):.4f} gn={gn.item():.1f} "
+                f"rel={sum(rel_h[-50:])/max(len(rel_h[-50:]),1):.4f} "
+                f"gnd={sum(gnd_h[-50:])/max(len(gnd_h[-50:]),1):.4f} gn={gn.item():.1f} "
                 f"{(time.time()-t0)/step:.2f}s/it")
         if step % args.eval_every == 0:
             ev = eval_losses(model, registry, tok, val, data, args.seq, dev)

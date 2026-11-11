@@ -97,6 +97,8 @@ def main():
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
     ap.add_argument("--lr-vrmg", type=float, default=2e-5)
     ap.add_argument("--lr-front", type=float, default=1e-5)
+    ap.add_argument("--tune-backbone", action="store_true", help="OPD 同时更新学生 LLM 主干")
+    ap.add_argument("--backbone-lr", type=float, default=1e-5)
     ap.add_argument("--n-eval", type=int, default=600)
     ap.add_argument("--n-acc", type=int, default=150)
     ap.add_argument("--n-em", type=int, default=100)
@@ -116,13 +118,11 @@ def main():
         paths.update(imgdata.parse_source(s)[1])
     data = tf.load_data(args.data)
     n = len(data["ids"])
-    order = list(range(n))
-    random.Random(0).shuffle(order)
-    n_val = max(64, n // 10)
-    val, train = order[:n_val], order[n_val:]
+    train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
     val_eval = val[: args.n_eval]
     train = [i for i in train if data["ids"][i] in paths]
-    random.Random(args.seed).shuffle(train)
+    val = [i for i in val if data["ids"][i] in paths]
+    assert train and val, "按图切分后可用 train/val 为空"
 
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     tok.padding_side = "right"
@@ -168,6 +168,12 @@ def main():
     freeze_all_but(model, [])
     for p in fparams + vparams:
         p.requires_grad_(True)
+    bparams = []
+    if args.tune_backbone:
+        bparams = list(model.parameters())
+        for p in bparams:
+            p.requires_grad_(True)
+    backbone_params = [p for p in bparams if all(p is not q for q in fparams + vparams)]
 
     teacher = AutoModelForImageTextToText.from_pretrained(args.teacher, dtype=torch.bfloat16, device_map=dev,
                                                           trust_remote_code=True).eval()
@@ -184,9 +190,11 @@ def main():
     log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items()))
 
     opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr_vrmg},
-                             {"params": fparams, "lr": args.lr_front}], weight_decay=0.01)
-    base_lrs = [args.lr_vrmg, args.lr_front]
-    all_params = fparams + vparams
+                             {"params": fparams, "lr": args.lr_front}] +
+                            ([{"params": backbone_params, "lr": args.backbone_lr}] if backbone_params else []),
+                            weight_decay=0.01)
+    base_lrs = [g["lr"] for g in opt.param_groups]
+    all_params = fparams + vparams + backbone_params
     collate_fn = tj.make_collate(data, paths, ip, tok, args.seq, False)
     t0, hist = time.time(), []
 
@@ -210,13 +218,14 @@ def main():
             front.eval()
             vh_ng, cl_ng = front(b["pv"].to(dev), b["grid"], b["lens"])
             vis_ng, vm_ng = tj.pad_vis([vh_ng[i, : cl_ng[i]].float() for i in range(len(cl_ng))], dev)
-            with rotation_context_with(registry, vis_ng, vm_ng):
+            with rotation_context_with(registry, vis_ng, vm_ng,
+                                       ans_start=[pad] * len(pids), text_mask=attn):
                 gen = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=args.max_new,
                                      min_new_tokens=args.min_new, do_sample=args.gen_temp > 0,
                                      temperature=max(args.gen_temp, 1e-5), top_p=0.9,
                                      pad_token_id=pad_id, eos_token_id=stops)
             front.train()
-        gids = [topd.cut_at_stop(gen[k, pad:], set(stops)) for k in range(len(idx))]
+        gids = [topd.cut_at_stop(gen[k, pad:], set(stops), include_stop=True) for k in range(len(idx))]
 
         # 2. VL 老师用原装视觉塔看同一张原图，对学生的生成轨迹逐 token 打分
         imgs = [Image.open(paths[data["ids"][i]]).convert("RGB") for i in idx]
@@ -237,7 +246,7 @@ def main():
                 tmask[k, : len(g)] = 1
         seq_ids, smask = torch.cat([in_ids, tail], dim=1), torch.cat([attn, tmask], dim=1)
         pos = (smask.cumsum(-1) - 1).clamp(min=0)
-        with rotation_context_with(registry, vis, vm):
+        with rotation_context_with(registry, vis, vm, ans_start=[pad] * len(idx), text_mask=smask):
             s_lg = model(input_ids=seq_ids, attention_mask=smask, position_ids=pos).logits[:, pad - 1 : pad - 1 + maxa].float()
 
         T = args.kd_temp
@@ -264,7 +273,7 @@ def main():
         loss = torch.stack(kl_terms).mean() * (T ** 2) if kl_terms else torch.tensor(0.0, device=dev)
         if args.ce_weight > 0:
             ids_g, mask_g, lab_g = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
-            with rotation_context_with(registry, vis, vm):
+            with rotation_context_with(registry, vis, vm, ans_start=b["a0s"], text_mask=mask_g):
                 lg_g = model(input_ids=ids_g, attention_mask=mask_g).logits.float()[:, :-1]
             ce = F.cross_entropy(lg_g.reshape(-1, lg_g.shape[-1]), lab_g[:, 1:].reshape(-1))
             loss = loss + args.ce_weight * ce
@@ -293,7 +302,8 @@ def main():
     log("FINAL[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in fin_ev.items()))
     log("DELTA[after - before]: " + " ".join(f"{k}={v:+.4f}" for k, v in result["delta"].items()))
     json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
-    torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": ja}, args.out + ".pt")
+    torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": ja,
+                "backbone": model.state_dict() if args.tune_backbone else None}, args.out + ".pt")
     log("JOINT_OPD_DONE")
 
 

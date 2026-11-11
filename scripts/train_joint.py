@@ -49,7 +49,8 @@ def make_collate(data, paths, ip, tok, seq, need_teacher):
         for j, p in enumerate(pvs):
             pv[j, : lens[j]] = p
         return dict(ids=ids, mask=mask, labels=labels, k_ids=k_ids, k_vals=k_vals, k_mask=k_mask, hidden=hidden,
-                    pv=pv, grid=torch.stack(grids), lens=lens, tgts=tgts)
+                    pv=pv, grid=torch.stack(grids), lens=lens, tgts=tgts,
+                    a0s=[data["a_rel_start"][i] for i in idx_list])
     return fn
 
 
@@ -84,7 +85,7 @@ def joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, sour
             if v is None:
                 lg = model(input_ids=ids, attention_mask=mask).logits.float()
             else:
-                with rotation_context_with(registry, v, m):
+                with rotation_context_with(registry, v, m, ans_start=b["a0s"], text_mask=mask):
                     lg = model(input_ids=ids, attention_mask=mask).logits.float()
             tot[key] += F.cross_entropy(lg[:, :-1].reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1)).item()
         cnt += 1
@@ -103,7 +104,7 @@ def joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, sour
         else:
             vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
         vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
+        with rotation_context_with(registry, vis, vm, ans_start=[a0], text_mask=torch.ones(1, len(tid), device=dev)):
             lg = model(input_ids=torch.tensor([tid], device=dev)).logits[0].float()
         preds = [lg[a0 - 1 + k].argmax().item() for k in range(na)]
         first += int(preds[0] == tid[a0]); full += int(preds == tid[a0 : a0 + na]); n += 1
@@ -139,6 +140,8 @@ def main():
     ap.add_argument("--kd-temp", type=float, default=2.0)
     ap.add_argument("--rel-weight", type=float, default=0.1)
     ap.add_argument("--feat-weight", type=float, default=1.0)
+    ap.add_argument("--gnd-weight", type=float, default=0.0, help="带梯度的同 batch 错图对比损失权重（>0 启用）")
+    ap.add_argument("--gnd-margin", type=float, default=0.75, help="首内容 token 错图与真图 NLL 边际阈值")
     ap.add_argument("--arm", choices=["ce", "kd", "rel"], default="rel")
     ap.add_argument("--n-eval", type=int, default=600)
     ap.add_argument("--seed", type=int, default=0)
@@ -159,12 +162,11 @@ def main():
         paths.update(imgdata.parse_source(s)[1])
     data = tf.load_data(args.data)
     n = len(data["ids"])
-    order = list(range(n))
-    random.Random(0).shuffle(order)
-    n_val = max(64, n // 10)
-    val, train = order[:n_val], order[n_val:]
+    train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
     val_eval = val[: args.n_eval]
-    random.Random(args.seed).shuffle(train)
+    train = [i for i in train if data["ids"][i] in paths]
+    val = [i for i in val if data["ids"][i] in paths]
+    assert train and val, "按图切分后可用 train/val 为空"
 
     ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
@@ -190,7 +192,7 @@ def main():
     if args.front_ckpt:
         front.load_state_dict(torch.load(args.front_ckpt, map_location=dev)["front"])
     log(f"=== joint stage={args.stage} front={args.front_mode} K={K} arm={args.arm} train={len(train)} "
-        f"val={len(val)} eval_n={len(val_eval)} ===")
+        f"val={len(val)} eval_n={len(val_eval)} split={split_info} ===")
     result = {"args": vars(args)}
     t0 = time.time()
 
@@ -213,15 +215,17 @@ def main():
         dl = DataLoader(train, batch_size=args.bs, shuffle=True, drop_last=True, num_workers=args.workers,
                         collate_fn=make_collate(data, paths, ip, tok, args.seq, args.arm != "ce"),
                         persistent_workers=True)
-        it, step, hist, micro = iter(dl), 0, [], 0
+        assert len(dl) > 0, "训练数据不足一个 drop_last batch"
+        it, hist = iter(dl), []
         all_params = fparams + vparams + (list(rel_head.parameters()) if rel_head is not None else [])
-        while step < args.steps:
+        for ms in range(1, args.steps * args.accum + 1):
+            step, micro = (ms - 1) // args.accum + 1, (ms - 1) % args.accum
             try:
                 b = next(it)
             except StopIteration:
-                it = iter(dl); continue
+                it = iter(dl)
+                b = next(it)
             if micro == 0:
-                step += 1
                 f = min(1.0, step / 100) * 0.5 * (1 + math.cos(math.pi * min(step, args.steps) / args.steps))
                 for g, bl in zip(opt.param_groups, base_lrs):
                     g["lr"] = bl * f
@@ -230,20 +234,31 @@ def main():
             v_hat, cl = front(b["pv"].to(dev), b["grid"], b["lens"])
             fl, _ = feature_loss(v_hat, b["tgts"], cl)
             vis, vm = pad_vis([v_hat[i, : cl[i]] for i in range(len(cl))], dev)
-            with rotation_context_with(registry, vis, vm):
+            with rotation_context_with(registry, vis, vm, ans_start=b["a0s"], text_mask=mask):
                 out = model(input_ids=ids, attention_mask=mask, output_hidden_states=(args.arm == "rel"))
             lg = out.logits.float()[:, :-1]
             ce = F.cross_entropy(lg.reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1))
             loss = ce + args.feat_weight * fl
+            if args.gnd_weight > 0.0 and ids.shape[0] >= 2:
+                perm = torch.tensor([(j + 1) % ids.shape[0] for j in range(ids.shape[0])], device=dev)
+                with rotation_context_with(registry, vis[perm], vm[perm], ans_start=b["a0s"], text_mask=mask):
+                    out_shuf = model(input_ids=ids, attention_mask=mask)
+                lg_shuf = out_shuf.logits.float()[:, :-1]
+                p0_list = []
+                for j, a0 in enumerate(b["a0s"]):
+                    if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
+                        a0 = a0 + 1
+                    p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
+                p0 = torch.tensor(p0_list, device=dev)
+                b_idx = torch.arange(ids.shape[0], device=dev)
+                y0 = ids[b_idx, p0 + 1]
+                nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
+                nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
+                gnd = F.relu(args.gnd_margin - (nll_shuf - nll_real)).mean()
+                loss = loss + args.gnd_weight * gnd
             if args.arm in ("kd", "rel"):
                 k_ids, k_vals, k_mask = b["k_ids"].to(dev), b["k_vals"].to(dev), b["k_mask"].to(dev)
-                full_logp = F.log_softmax(lg / args.kd_temp, dim=-1)
-                stu_k = full_logp.gather(-1, k_ids.clamp(min=0))
-                p_t = F.softmax(k_vals / args.kd_temp, dim=-1)
-                p_rest = (1.0 - p_t.sum(-1)).clamp(min=1e-6)
-                p_s_rest = (1.0 - stu_k.exp().sum(-1)).clamp(min=1e-6)
-                kl = (p_t * (torch.log(p_t.clamp(min=1e-9)) - stu_k)).sum(-1) + p_rest * (torch.log(p_rest) - torch.log(p_s_rest))
-                kd = (kl * k_mask).sum() / k_mask.sum().clamp(min=1.0) * args.kd_temp ** 2
+                kd = tf.topk_conditional_kl(lg, k_ids, k_vals, k_mask, args.kd_temp)
                 loss = loss + args.kd_weight * kd
                 if args.arm == "rel":
                     terms = []
@@ -254,10 +269,8 @@ def main():
                     loss = loss + args.rel_weight * torch.stack(terms).mean()
             (loss / args.accum).backward()
             hist.append((ce.item(), fl.item()))
-            micro += 1
-            if micro < args.accum:
+            if micro < args.accum - 1:
                 continue
-            micro = 0
             gn = torch.nn.utils.clip_grad_norm_(all_params, 1.0)
             opt.step()
             if step % 50 == 0:

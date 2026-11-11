@@ -55,12 +55,12 @@ class Runner:
             self.tok.pad_token = self.tok.eos_token
         self.stops = topd.stop_ids(self.tok)
         self.pad_id = self.tok.pad_token_id
-        self.let_ids = {l: self.tok.encode(" " + l, add_special_tokens=False)[0] for l in "ABCD"}
+        self.let_ids = {l: self.tok.encode(" " + l, add_special_tokens=False)[0] for l in "ABCDEFGH"}
         self.yn_ids = {"Yes": self.tok.encode(" Yes", add_special_tokens=False)[0],
                        "No": self.tok.encode(" No", add_special_tokens=False)[0]}
         self.step0_ban_ids = sorted({
             self.tok.encode(s, add_special_tokens=False)[0]
-            for s in [" A", " B", " C", " D", " E", "A", "B", "C", "D", "E", " (A)", " (B)", " (C)", " (D)"]
+            for s in [" A", " B", " C", " D", " E", " F", " G", " H", "A", "B", "C", "D", "E", "F", "G", "H", " (A)", " (B)", " (C)", " (D)"]
             if len(self.tok.encode(s, add_special_tokens=False)) == 1
         })
         self.ip = AutoProcessor.from_pretrained(teacher, trust_remote_code=True).image_processor
@@ -99,12 +99,15 @@ class Runner:
                                                    query_dim=a1["query_dim"],
                                                    wrap_extra=[l for l in range(K) if l not in layers],
                                                    prompt_alpha=pa, hyb_bound=hb, **kw)
+            assert len(vrmgs) == len(states), f"vrmg count mismatch: {len(vrmgs)} != {len(states)}"
             for m, sd in zip(vrmgs, states):
                 m.load_state_dict(sd)
             for m in vrmgs:
                 m.eval()
+            if ck.get("backbone"):
+                self.model.load_state_dict(ck["backbone"], strict=True)
             self.arch = {"layers": layers, "block": a1["block"], **kw, "front_mode": front_mode, "K": K,
-                         "prompt_alpha": pa, "hyb_bound": hb}
+                         "prompt_alpha": pa, "hyb_bound": hb, "tuned_backbone": bool(ck.get("backbone"))}
             if mode == "tower":
                 self.vision = load_vision_tower(teacher, dev)
             else:
@@ -194,8 +197,11 @@ class Runner:
             lg = self.model(inputs_embeds=E, attention_mask=M).logits[:, -1, :].float() if any(is_mc) else None
             tails = []
             if need_gen:
-                gen = self.model.generate(inputs_embeds=E, attention_mask=M, max_new_tokens=max_new, do_sample=False,
-                                          no_repeat_ngram_size=3, pad_token_id=self.pad_id, eos_token_id=self.stops)
+                gkw = dict(inputs_embeds=E, attention_mask=M, max_new_tokens=max_new, do_sample=False,
+                           no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
+                if items and bench in ("chartqa", "mathvista", "geometry3k") and not force_gen:
+                    gkw["logits_processor"] = LogitsProcessorList([FirstStepBanLetterProcessor(n, self.step0_ban_ids)])
+                gen = self.model.generate(**gkw)
                 tails = [g for g in gen]
         else:
             pv, grid, lens = self._pix(images)
@@ -206,7 +212,7 @@ class Runner:
                 feats = [vh[i, : cl[i]].float() for i in range(len(cl))]
             vis, vm = topd.pad_vis(feats, self.dev)
             ids = torch.tensor([[self.pad_id] * (pad - len(x)) + x for x in pids], device=self.dev)
-            with rotation_context_with(self.registry, vis, vm):
+            with rotation_context_with(self.registry, vis, vm, text_mask=attn):
                 lg = self.model(input_ids=ids, attention_mask=attn).logits[:, -1, :].float() if any(is_mc) else None
                 tails = []
                 if need_gen:
@@ -226,8 +232,8 @@ class Runner:
                     out.append("Yes" if c_lgs[0] >= c_lgs[1] else "No")
                     stats.append({"cand_logits": c_lgs})
                 else:
-                    nc = min(len(items[k]["choices"]), 4)
-                    cand = ["ABCD"[c] for c in range(nc)]
+                    nc = min(len(items[k]["choices"]), len(self.let_ids))
+                    cand = ["ABCDEFGH"[c] for c in range(nc)]
                     c_lgs = [lg[k, self.let_ids[l]].item() for l in cand]
                     out.append(cand[int(max(range(nc), key=lambda i: c_lgs[i]))])
                     stats.append({"cand_logits": c_lgs})

@@ -3,9 +3,11 @@
 import math
 import re
 
-_NUM = re.compile(r"-?\d+(?:\.\d+)?")
+_NUM = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s*/\s*(\d+(?:\.\d+)?))?")
 _BOXED = re.compile(r"\\boxed\{([^{}]+)\}")
 _YN_MAP = {"true": "yes", "false": "no", "y": "yes", "n": "no"}
+_ANS_PREFIX = re.compile(r"^(?:the\s+)?(?:final\s+)?(?:answer|choice|option|conclusion)\s*(?:is)?\s*[:=-]?\s*", re.I)
+_NEG_WORDS = {"not", "no", "never", "neither", "nor", "without", "isnt", "arent", "wasnt", "werent", "cannot", "cant", "dont", "doesnt", "didnt"}
 
 
 def wilson(k, n, z=1.96):
@@ -31,13 +33,28 @@ def first_number(s):
     mb = _BOXED.findall(s)
     if mb:
         s = mb[-1]
+    s = _ANS_PREFIX.sub("", s.strip())
     s = re.sub(r"^\s*\([a-zA-Z0-9]\)\s*", "", s.replace(",", ""))
     m = _NUM.search(s)
-    return float(m.group()) if m else None
+    if not m:
+        return None
+    num = float(m.group(1))
+    if m.group(2) is not None:
+        den = float(m.group(2))
+        return num / den if den != 0 else None
+    return num
+
+
+def _has_negation_before(text_low, target_low):
+    idx = text_low.find(target_low)
+    if idx < 0:
+        return False
+    prefix_words = re.findall(r"[a-z]+", text_low[:idx].replace("'", ""))
+    return any(w in _NEG_WORDS for w in prefix_words[-3:])
 
 
 def pick_choice(pred, choices):
-    p = pred.strip()
+    p = _ANS_PREFIX.sub("", pred.strip()).strip()
     if not p or not choices:
         return -1
     if choices == ["Yes", "No"]:
@@ -46,12 +63,14 @@ def pick_choice(pred, choices):
             return 0
         if low in ("no", "false", "n", "incorrect", "wrong"):
             return 1
-        first_w = re.split(r"[\s.,;:!?()]+", p.lower().strip())[0] if p.strip() else ""
-        if first_w in ("yes", "true"):
-            return 0
-        if first_w in ("no", "false"):
-            return 1
-    m = re.fullmatch(r"\(?([A-Za-z])\)?[.):]?", p) or re.match(r"\(?([A-Za-z])[.):]\s*\S", p)
+        words = re.findall(r"[a-z]+", p.lower())
+        if words:
+            if words[0] in ("yes", "true"):
+                return 0
+            if words[0] in ("no", "false"):
+                return 1
+        return -1
+    m = re.fullmatch(r"\(?([A-Ha-h])\)?[.):]?", p) or re.match(r"\(?([A-Ha-h])[.):]\s*\S", p)
     if m:
         i = ord(m.group(1).upper()) - 65
         if 0 <= i < len(choices):
@@ -60,7 +79,13 @@ def pick_choice(pred, choices):
     exact = [i for i, c in enumerate(choices) if cnorm(c) == pc]
     if len(exact) == 1:
         return exact[0]
-    part = [i for i, c in enumerate(choices) if len(cnorm(c)) >= 3 and cnorm(c) in pc]
+    p_low = p.lower()
+    part = []
+    for i, c in enumerate(choices):
+        c_str = str(c).strip().lower()
+        if len(cnorm(c)) >= 3 and re.search(r"(?<![a-z0-9])" + re.escape(c_str) + r"(?![a-z0-9])", p_low):
+            if not _has_negation_before(p_low, c_str):
+                part.append(i)
     return part[0] if len(part) == 1 else -1
 
 
@@ -78,22 +103,32 @@ def _tf(t):
 
 def hit_relaxed(pred, golds):
     """ChartQA 官方 relaxed correctness：数值相对误差 ≤5%（支持从句子/boxed 中抽首个数值），文本支持 Yes/No 与 True/False 同义归一。"""
-    p = re.sub(r"^(answer\s*[:=]?\s*)", "", pred.strip(), flags=re.I).strip()
+    p = _ANS_PREFIX.sub("", pred.strip()).strip()
+    p_has_pct = "%" in p
     for g in golds:
-        gf = _tf(g)
+        g_str = str(g).strip()
+        g_has_pct = "%" in g_str
+        gf = _tf(g_str)
         pf = _tf(p)
         if pf is None and gf is not None:
             pf = first_number(p)
-        if pf is not None and gf:
-            if abs(pf - gf) / abs(gf) <= 0.05 or (abs(pf / 100.0 - gf) / abs(gf) <= 0.05):
-                return True
-        elif pf == 0.0 and gf == 0.0:
-            return True
+        if pf is not None and gf is not None:
+            if gf == 0.0:
+                if abs(pf) <= 1e-6:
+                    return True
+            else:
+                if abs(pf - gf) / abs(gf) <= 0.05:
+                    return True
+                if (p_has_pct or g_has_pct or abs(gf) <= 1.0) and abs(pf / 100.0 - gf) / abs(gf) <= 0.05:
+                    return True
         else:
-            gs = _YN_MAP.get(str(g).strip().lower().rstrip("."), str(g).strip().lower().rstrip("."))
+            gs = _YN_MAP.get(g_str.lower().rstrip("."), g_str.lower().rstrip("."))
             ps = _YN_MAP.get(p.lower().rstrip("."), p.lower().rstrip("."))
-            if ps == gs or (len(gs) >= 2 and gs in ps):
+            if ps == gs:
                 return True
+            if len(gs) >= 2 and re.search(r"(?<![a-z0-9])" + re.escape(gs) + r"(?![a-z0-9])", ps):
+                if not _has_negation_before(ps, gs):
+                    return True
     return False
 
 
@@ -130,7 +165,7 @@ def hit_mv_free(pred, gold, answer_type, precision):
         if answer_type == "integer":
             return int(round(pv)) == int(round(gv))
         d = int(precision) if precision is not None else 2
-        return round(pv, d) == round(gv, d) or abs(pv - gv) <= 0.05 * max(1.0, abs(gv))
+        return round(pv, d) == round(gv, d)
     return norm(pred) == norm(gold)
 
 
@@ -171,8 +206,13 @@ def selftest():
     assert pick_choice("B", ch) == 1 and pick_choice("(C) 50°", ch) == 2 and pick_choice("d. 60°", ch) == 3
     assert pick_choice("140°", ch) == 1 and pick_choice("A cat sat", ["A cat sat", "x"]) == 0
     assert pick_choice("yes.", ["Yes", "No"]) == 0 and pick_choice("No", ["Yes", "No"]) == 1
+    assert pick_choice("Answer: No", ["Yes", "No"]) == 1 and pick_choice("Answer: Yes", ["Yes", "No"]) == 0
+    assert pick_choice("yesterday", ["Yes", "No"]) == -1
     assert hit_relaxed("14", ["14"]) and hit_relaxed("The answer is 14.5", ["14"]) and not hit_relaxed("15", ["14"])
+    assert not hit_relaxed("1400", ["14"]) and not hit_relaxed("not blue", ["blue"])
     assert hit_relaxed("False", ["No"]) and hit_relaxed("True", ["Yes"])
+    assert first_number("1e3") == 1000.0 and first_number("1/2") == 0.5
+    assert not hit_mv_free("10.4", "10", "float", 2)
     assert hit_ocr("Centre", ["CENTRE"], "Regular Text Recognition")
     assert hit_geo("48", ["48"]) and hit_geo(r"\boxed{(a) 48}", ["48"]) and not hit_geo("52", ["48"])
     assert hit_mv_free("1000", "1000", "integer", None) and hit_mv_free("1.23", "1.2", "float", 1)

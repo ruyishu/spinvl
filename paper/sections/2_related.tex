@@ -17,7 +17,7 @@ Encoder-free VLMs internalise visual processing into the LLM by duplicating
 modality-specific weights~\citep{diao2024eve} or inserting low-rank
 adapters~\citep{hu2021lora,vora2025} into the early layers and distilling a
 vision tower. While this removes the external ViT, unfreezing copied layers
-requires ratusan of millions of parameters, and permanently merging additive
+requires hundreds of millions of parameters, and permanently merging additive
 adapters into a text model destroys arithmetic reasoning, which motivates a
 multiplicative, context-gated form of adaptation.
 

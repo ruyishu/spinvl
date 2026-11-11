@@ -1,0 +1,167 @@
+{
+  "name": "q06_p15_free_hyb_opd_fgen",
+  "mode": "tower_free",
+  "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p15/p15_q06_free_hybrid_opd.pt",
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-0.6B",
+  "arch": {
+    "layers": [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24
+    ],
+    "block": 64,
+    "multifreq": false,
+    "tokrot": false,
+    "hybrid": true,
+    "qcond": false,
+    "direct_hyb": false,
+    "front_mode": "rots",
+    "K": 4,
+    "prompt_alpha": 1.0,
+    "hyb_bound": 0.0
+  },
+  "args": {
+    "mode": "tower_free",
+    "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p15/p15_q06_free_hybrid_opd.pt",
+    "name": "q06_p15_free_hyb_opd_fgen",
+    "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-0.6B",
+    "benches": "mmstar,hallusion,mathvista,geometry3k",
+    "limit": 0,
+    "bs": 8,
+    "max_pixels": 153664,
+    "max_new": 24,
+    "image_ctrl": "none",
+    "force_gen": true,
+    "flags": "",
+    "prompt_alpha": null,
+    "hyb_bound": null,
+    "out_dir": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/bench_eval_v4",
+    "selftest": false,
+    "check_data": false
+  },
+  "benches": {
+    "mmstar": {
+      "n": 1500,
+      "hits": 333,
+      "acc": 0.222,
+      "ci95": [
+        0.20169322285427788,
+        0.24372709268959325
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "coarse perception": {
+          "n": 250,
+          "acc": 0.308
+        },
+        "fine-grained perception": {
+          "n": 250,
+          "acc": 0.172
+        },
+        "instance reasoning": {
+          "n": 250,
+          "acc": 0.24
+        },
+        "logical reasoning": {
+          "n": 250,
+          "acc": 0.2
+        },
+        "math": {
+          "n": 250,
+          "acc": 0.18
+        },
+        "science & technology": {
+          "n": 250,
+          "acc": 0.232
+        }
+      },
+      "eos_stop_rate": 0.9746666666666667,
+      "avg_gen_tokens": 2.3526666666666665,
+      "rep3_rate": 0.062,
+      "seconds": 94.90170383453369
+    },
+    "hallusion": {
+      "n": 951,
+      "hits": 318,
+      "acc": 0.334384858044164,
+      "ci95": [
+        0.3051193677514319,
+        0.36498298220902214
+      ],
+      "empty_rate": 0.0031545741324921135,
+      "by_cat": {
+        "VD": {
+          "n": 591,
+          "acc": 0.32656514382402707
+        },
+        "VS": {
+          "n": 360,
+          "acc": 0.3472222222222222
+        }
+      },
+      "eos_stop_rate": 1.0,
+      "avg_gen_tokens": 1.6382754994742377,
+      "rep3_rate": 0.016824395373291272,
+      "seconds": 64.16705226898193
+    },
+    "mathvista": {
+      "n": 1000,
+      "hits": 144,
+      "acc": 0.144,
+      "ci95": [
+        0.12360059987923061,
+        0.16712415191427943
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "free_form/float": {
+          "n": 40,
+          "acc": 0.025
+        },
+        "free_form/integer": {
+          "n": 418,
+          "acc": 0.014354066985645933
+        },
+        "free_form/list": {
+          "n": 2,
+          "acc": 0.0
+        },
+        "multi_choice/text": {
+          "n": 540,
+          "acc": 0.2537037037037037
+        }
+      },
+      "eos_stop_rate": 0.994,
+      "avg_gen_tokens": 3.103,
+      "rep3_rate": 0.073,
+      "seconds": 79.03576803207397
+    },
+    "geometry3k": {
+      "n": 601,
+      "hits": 14,
+      "acc": 0.02329450915141431,
+      "ci95": [
+        0.013925735953655293,
+        0.03871879114236455
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "geometry3k": {
+          "n": 601,
+          "acc": 0.02329450915141431
+        }
+      },
+      "eos_stop_rate": 1.0,
+      "avg_gen_tokens": 4.477537437603993,
+      "rep3_rate": 0.011647254575707155,
+      "seconds": 43.85831665992737
+    }
+  },
+  "seconds": 286.136638879776,
+  "peak_gib": 2.295125961303711,
+  "note": "对齐训练格式的规则判分（选择题/判断题用候选对数似然，开放题贪心解码+防复读）；图片缩放到 ≤max_pixels"
+}

@@ -1,0 +1,167 @@
+{
+  "name": "q17_p15_free_hyb_opd_fgen",
+  "mode": "tower_free",
+  "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p15/p15_q17_free_hybrid_opd.pt",
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "arch": {
+    "layers": [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24
+    ],
+    "block": 64,
+    "multifreq": false,
+    "tokrot": false,
+    "hybrid": true,
+    "qcond": false,
+    "direct_hyb": false,
+    "front_mode": "rots",
+    "K": 4,
+    "prompt_alpha": 1.0,
+    "hyb_bound": 0.0
+  },
+  "args": {
+    "mode": "tower_free",
+    "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/p15/p15_q17_free_hybrid_opd.pt",
+    "name": "q17_p15_free_hyb_opd_fgen",
+    "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+    "benches": "mmstar,hallusion,mathvista,geometry3k",
+    "limit": 0,
+    "bs": 8,
+    "max_pixels": 153664,
+    "max_new": 24,
+    "image_ctrl": "none",
+    "force_gen": true,
+    "flags": "",
+    "prompt_alpha": null,
+    "hyb_bound": null,
+    "out_dir": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/bench_eval_v4",
+    "selftest": false,
+    "check_data": false
+  },
+  "benches": {
+    "mmstar": {
+      "n": 1500,
+      "hits": 376,
+      "acc": 0.25066666666666665,
+      "ci95": [
+        0.22938945849108067,
+        0.2732177309895136
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "coarse perception": {
+          "n": 250,
+          "acc": 0.336
+        },
+        "fine-grained perception": {
+          "n": 250,
+          "acc": 0.212
+        },
+        "instance reasoning": {
+          "n": 250,
+          "acc": 0.22
+        },
+        "logical reasoning": {
+          "n": 250,
+          "acc": 0.24
+        },
+        "math": {
+          "n": 250,
+          "acc": 0.236
+        },
+        "science & technology": {
+          "n": 250,
+          "acc": 0.26
+        }
+      },
+      "eos_stop_rate": 1.0,
+      "avg_gen_tokens": 1.0313333333333334,
+      "rep3_rate": 0.0013333333333333333,
+      "seconds": 106.57550883293152
+    },
+    "hallusion": {
+      "n": 951,
+      "hits": 12,
+      "acc": 0.012618296529968454,
+      "ci95": [
+        0.00723264607063964,
+        0.021925698098696926
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "VD": {
+          "n": 591,
+          "acc": 0.015228426395939087
+        },
+        "VS": {
+          "n": 360,
+          "acc": 0.008333333333333333
+        }
+      },
+      "eos_stop_rate": 0.9789695057833859,
+      "avg_gen_tokens": 5.840168243953733,
+      "rep3_rate": 0.18401682439537329,
+      "seconds": 104.0094428062439
+    },
+    "mathvista": {
+      "n": 1000,
+      "hits": 163,
+      "acc": 0.163,
+      "ci95": [
+        0.14140362461572464,
+        0.1871757050315026
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "free_form/float": {
+          "n": 40,
+          "acc": 0.05
+        },
+        "free_form/integer": {
+          "n": 418,
+          "acc": 0.007177033492822967
+        },
+        "free_form/list": {
+          "n": 2,
+          "acc": 0.0
+        },
+        "multi_choice/text": {
+          "n": 540,
+          "acc": 0.29259259259259257
+        }
+      },
+      "eos_stop_rate": 0.994,
+      "avg_gen_tokens": 3.043,
+      "rep3_rate": 0.158,
+      "seconds": 95.89661908149719
+    },
+    "geometry3k": {
+      "n": 601,
+      "hits": 15,
+      "acc": 0.024958402662229616,
+      "ci95": [
+        0.015182303608217502,
+        0.04076887435308674
+      ],
+      "empty_rate": 0.0,
+      "by_cat": {
+        "geometry3k": {
+          "n": 601,
+          "acc": 0.024958402662229616
+        }
+      },
+      "eos_stop_rate": 0.9916805324459235,
+      "avg_gen_tokens": 4.004991680532446,
+      "rep3_rate": 0.013311148086522463,
+      "seconds": 47.80542325973511
+    }
+  },
+  "seconds": 360.3175690174103,
+  "peak_gib": 5.08758544921875,
+  "note": "对齐训练格式的规则判分（选择题/判断题用候选对数似然，开放题贪心解码+防复读）；图片缩放到 ≤max_pixels"
+}

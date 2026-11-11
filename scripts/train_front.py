@@ -38,7 +38,7 @@ def evaluate(front, loader, dev, max_batches=40):
         cos += c.item() * len(lens)
         n += len(lens)
     front.train()
-    return 1.0 - cos / max(n, 1)  # 平均余弦相似度
+    return cos / max(n, 1)  # 平均余弦相似度（相同特征为 1.0，正交为 0.0）
 
 
 def main():
@@ -71,12 +71,34 @@ def main():
     ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
     items, views = imgdata.make_items(load_data, args.source)
     vjoined = imgdata.Joined(views)
-    rnd = random.Random(0)
-    rnd.shuffle(items)
-    val_items, train_items = items[: args.n_val], items[args.n_val :]
+    # 按真实图片内容 SHA1 分组切分 train/val，优先复用 existing_img_hashes_v2.pt 免去 NFS 逐文件重算
+    import hashlib
+    hcache_p = f"{B}/zk/project/rose-distill/data/existing_img_hashes_v2.pt"
+    hcache = torch.load(hcache_p, map_location="cpu", weights_only=False) if os.path.exists(hcache_p) else {}
+    by_img, path_sha = {}, {}
+    for it_pair in items:
+        rp = os.path.realpath(it_pair[1])
+        if rp not in path_sha:
+            if rp in hcache and hcache[rp] is not None:
+                path_sha[rp] = hcache[rp][0].hex()
+            else:
+                path_sha[rp] = hashlib.sha1(open(rp, "rb").read()).hexdigest() if os.path.exists(rp) else rp
+        by_img.setdefault(path_sha[rp], []).append(it_pair)
+    img_keys = sorted(by_img.keys())
+    random.Random(0).shuffle(img_keys)
+    val_items, train_items, val_imgs, train_imgs = [], [], set(), set()
+    for k in img_keys:
+        if len(val_items) < args.n_val:
+            val_items.extend(by_img[k])
+            val_imgs.add(k)
+        else:
+            train_items.extend(by_img[k])
+            train_imgs.add(k)
+    assert len(val_imgs & train_imgs) == 0, "train_front: train 与 val 存在共享图片！"
     rnd2 = random.Random(args.seed)
     rnd2.shuffle(train_items)
-    log(f"=== front mode={args.mode} K={args.K} train={len(train_items)} val={len(val_items)} ===")
+    log(f"=== front mode={args.mode} K={args.K} train={len(train_items)}({len(train_imgs)} imgs) "
+        f"val={len(val_items)}({len(val_imgs)} imgs) overlap=0 ===")
 
     train_ds = imgdata.FrontDataset(train_items, vjoined, ip)
     val_ds = imgdata.FrontDataset(val_items, vjoined, ip)
@@ -139,7 +161,7 @@ def main():
             v_hat, cl = front(pv.to(dev), grid, lens)
             loss, dcos = feature_loss(v_hat, tgts, cl)
             (loss / args.accum).backward()
-            hist.append(1.0 - dcos.item())
+            hist.append(dcos.item())
         gn = torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step()
         if step % 50 == 0:

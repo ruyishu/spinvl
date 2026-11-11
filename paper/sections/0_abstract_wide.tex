@@ -17,12 +17,15 @@ block-diagonal rotations driven by multi-frequency or spatial-anchor queries.
 Modality decoupling keeps pure-text inference bit-exact ($70.4\%$ GSM8K),
 whereas merging vision adapters into the backbone collapses GSM8K to $0.0\%$.
 Second, \emph{online policy distillation} (VL-OPD) supervises student rollouts
-with token-level forward KL from a teacher VLM, boosting free-form generation
-by up to $+9.9$ points. Under identical data, steps, and base models,
-\modelname{} surpasses a token-concatenation LLaVA baseline on perception and
-anti-hallucination ($44.37\%$ vs.\ $41.35\%$), matches it across perception,
-hallucination, and mathematical reasoning ($35.90\%$ vs.\ $35.87\%$), and beats
-single-frequency rotation and LoRA built-in encoders while cutting FLOPs by
-$74.2\%$ and latency by $19.5\%$ at high resolution.
+with token-level KL from a teacher VLM, boosting $0.6$B free-form generation
+by up to $+9.9$ points and lifting $1.7$B tower-free perception and
+anti-hallucination on the base mixture from $40.21\%$ to $42.46\%$. Under
+identical data, steps, and seed ($s{=}0$), \modelname{} surpasses a
+token-concatenation LLaVA baseline on perception and anti-hallucination
+($44.37\%$ vs.\ $41.35\%$ MC2 on base; $42.11\%$ vs.\ $41.71\%$ on +open),
+closely matches it across perception, hallucination, and mathematical reasoning
+($35.75\%$ vs.\ $35.87\%$ Core3 on base; $35.90\%$ vs.\ $36.14\%$ on +open), and
+outperforms single-frequency rotation and LoRA built-in encoders while cutting
+FLOPs by $74.2\%$ and latency by $19.5\%$ at high resolution.
 \end{minipage}
 \end{center}

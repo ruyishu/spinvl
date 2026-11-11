@@ -1,10 +1,12 @@
 """6 个公开榜统一评测（MMStar / HallusionBench / ChartQA / OCRBench / MathVista testmini / Geometry3K test）。"""
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -12,6 +14,52 @@ import bench_data as bd  # noqa: E402
 import bench_score as bs  # noqa: E402
 
 ROOT = bd.B + "/zk/project/rose-distill"
+
+
+def _item_img_key(it, idx):
+    raw = it.get("img_bytes")
+    if raw is None and it.get("img_path") and os.path.exists(it["img_path"]):
+        raw = open(it["img_path"], "rb").read()
+    if raw is not None:
+        sha = hashlib.sha256(raw).hexdigest()
+        try:
+            import io
+            import numpy as np
+            from PIL import Image
+            im = Image.open(io.BytesIO(raw)).convert("L").resize((9, 8), Image.BILINEAR)
+            g = np.asarray(im, dtype=np.int16)
+            bits = (g[:, 1:] > g[:, :-1]).flatten()
+            dh = 0
+            for b in bits:
+                dh = (dh << 1) | int(b)
+            return f"dh:{dh:016x}"
+        except Exception:
+            return f"sha:{sha}"
+    return f"id:{it.get('id', idx)}"
+
+
+def build_derangement_by_image(items, shift_seed=1):
+    """按图像内容 SHA256 分组构造严格异图置换（保證每道题换到的图与原图 SHA256 100% 不同）。"""
+    n = len(items)
+    if n <= 1:
+        return list(range(n)), 0
+    keys = [_item_img_key(it, idx) for idx, it in enumerate(items)]
+    groups = defaultdict(list)
+    for idx, k in enumerate(keys):
+        groups[k].append(idx)
+    if len(groups) <= 1:
+        return list(range(n)), n
+    sorted_groups = sorted(groups.values(), key=lambda g: (-len(g), keys[g[0]]))
+    max_g = max(len(g) for g in sorted_groups)
+    assert max_g * 2 <= n, f"最大同图组 {max_g} 超过总题数一半 {n}，无法构造零碰撞置换"
+    ordered = [idx for g in sorted_groups for idx in g]
+    shift = max_g + (shift_seed % max(1, n - 2 * max_g + 1))
+    perm = [0] * n
+    for pos, orig_idx in enumerate(ordered):
+        perm[orig_idx] = ordered[(pos + shift) % n]
+    same_cnt = sum(1 for i in range(n) if keys[perm[i]] == keys[i])
+    assert same_cnt == 0, f"异图置换仍存在 {same_cnt} 道同图题！"
+    return perm, same_cnt
 
 
 def main():
@@ -51,23 +99,33 @@ def main():
     res, pf = {}, open(f"{args.out_dir}/{args.name}.preds.jsonl", "w")
     for b in args.benches.split(","):
         items = bd.load_bench(b, args.limit)
+        perm, same_img_cnt = build_derangement_by_image(items) if args.image_ctrl == "shuffle" else (list(range(len(items))), 0)
         recs, tb = [], time.time()
         for i in range(0, len(items), args.bs):
             chunk = items[i : i + args.bs]
-            src = [items[(i + k + 1) % len(items)] for k in range(len(chunk))] if args.image_ctrl == "shuffle" else chunk
+            src = [items[perm[i + k]] for k in range(len(chunk))] if args.image_ctrl == "shuffle" else chunk
             if args.image_ctrl == "blank":
                 from PIL import Image
-                imgs = [Image.new("RGB", (224, 224), (0, 0, 0)) for _ in src]
+                imgs = []
+                for it in src:
+                    im_real = bd.get_image(it, args.max_pixels)
+                    sz = im_real.size if im_real is not None else (224, 224)
+                    imgs.append(Image.new("RGB", sz, (0, 0, 0)))
             else:
                 imgs = [bd.get_image(it, args.max_pixels) for it in src]
             prompts = [it["prompt"] for it in chunk]
             try:
                 preds = run.generate(prompts, imgs, args.max_new, items=chunk, bench=b, force_gen=args.force_gen)
+                stats_list = list(getattr(run, "last_gen_stats", None) or [{}] * len(preds))
             except torch.OutOfMemoryError:
                 torch.cuda.empty_cache()
-                preds = [run.generate([p], [im], args.max_new, items=[it], bench=b, force_gen=args.force_gen)[0]
-                         for p, im, it in zip(prompts, imgs, chunk)]
-            stats_list = getattr(run, "last_gen_stats", None) or [{}] * len(preds)
+                preds, stats_list = [], []
+                for p, im, it in zip(prompts, imgs, chunk):
+                    p_one = run.generate([p], [im], args.max_new, items=[it], bench=b, force_gen=args.force_gen)[0]
+                    st_one = (getattr(run, "last_gen_stats", None) or [{}])[0]
+                    preds.append(p_one)
+                    stats_list.append(st_one)
+            assert len(preds) == len(chunk) and len(stats_list) == len(chunk), "预测或统计条数与输入 chunk 不一致"
             for it, p, st in zip(chunk, preds, stats_list):
                 hit = int(bs.score_item(b, it, p))
                 recs.append({"id": it["id"], "cat": it["cat"], "pred": p, "hit": hit, "gold_idx": it.get("gold_idx", -1), **st})
@@ -77,19 +135,33 @@ def main():
                 print(f"[{b}] {len(recs)}/{len(items)} acc={sum(r['hit'] for r in recs) / len(recs):.3f} "
                       f"{time.time() - tb:.0f}s", flush=True)
         res[b] = bs.aggregate(b, recs)
+        if args.image_ctrl == "shuffle":
+            res[b]["shuffle_same_image_count"] = same_img_cnt
+        if b == "hallusion" or any(r.get("pred") in ("Yes", "No") for r in recs):
+            yn_recs = [r for r in recs if r.get("pred") in ("Yes", "No")]
+            if yn_recs:
+                res[b]["pred_yes_rate"] = sum(1 for r in yn_recs if r["pred"] == "Yes") / len(yn_recs)
+                res[b]["pred_no_rate"] = sum(1 for r in yn_recs if r["pred"] == "No") / len(yn_recs)
+            yes_g = [r["hit"] for r in recs if r.get("gold_idx") == 0]
+            no_g = [r["hit"] for r in recs if r.get("gold_idx") == 1]
+            if yes_g and no_g:
+                res[b]["yes_acc"] = sum(yes_g) / len(yes_g)
+                res[b]["no_acc"] = sum(no_g) / len(no_g)
+                res[b]["balanced_acc"] = 0.5 * (res[b]["yes_acc"] + res[b]["no_acc"])
         mc_recs = [r for r in recs if "cand_logits" in r and r.get("gold_idx", -1) >= 0]
         if mc_recs:
-            max_c = max(len(r["cand_logits"]) for r in mc_recs)
-            same_c = [r for r in mc_recs if len(r["cand_logits"]) == max_c]
-            if same_c:
-                mean_lg = [sum(r["cand_logits"][c] for r in same_c) / len(same_c) for c in range(max_c)]
-                cal_hits = 0
-                for r in mc_recs:
-                    cl = r["cand_logits"]
-                    adj = [cl[c] - (mean_lg[c] if c < len(mean_lg) else 0.0) for c in range(len(cl))]
-                    pred_idx = int(max(range(len(adj)), key=lambda c: adj[c]))
+            by_nc = defaultdict(list)
+            for r in mc_recs:
+                by_nc[len(r["cand_logits"])].append(r)
+            cal_hits = 0
+            for nc, grp in by_nc.items():
+                mean_lg = [sum(r["cand_logits"][c] for r in grp) / len(grp) for c in range(nc)]
+                for r in grp:
+                    adj = [r["cand_logits"][c] - mean_lg[c] for c in range(nc)]
+                    pred_idx = int(max(range(nc), key=lambda c: adj[c]))
                     cal_hits += int(pred_idx == r["gold_idx"])
-                res[b]["cal_acc"] = cal_hits / len(mc_recs)
+            res[b]["cal_acc"] = cal_hits / len(mc_recs)
+            res[b]["cal_acc_n"] = len(mc_recs)
         if any("eos_stop" in r for r in recs):
             gr = [r for r in recs if "eos_stop" in r]
             res[b]["eos_stop_rate"] = sum(r["eos_stop"] for r in gr) / len(gr)

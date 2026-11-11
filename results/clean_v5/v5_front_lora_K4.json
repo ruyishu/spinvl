@@ -1,0 +1,30 @@
+{
+ "args": {
+  "mode": "lora",
+  "K": 4,
+  "lora_rank": 16,
+  "source": [
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp"
+  ],
+  "eval_source": [],
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "bs": 16,
+  "accum": 1,
+  "steps": 2000,
+  "lr": 0.0003,
+  "lr_static": 0.001,
+  "workers": 3,
+  "eval_every": 500,
+  "n_val": 400,
+  "seed": 0,
+  "out": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v5/v5_front_lora_K4"
+ },
+ "val_cos": 0.5991707611083984,
+ "extra_cos": {},
+ "trainable_M": 56.518656,
+ "static_M": 2.490368,
+ "seconds": 894.3342709541321,
+ "peak_gib": 9.432230949401855
+}

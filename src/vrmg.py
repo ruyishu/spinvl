@@ -123,13 +123,24 @@ class LayerVRMG(nn.Module):
         return w @ v
 
     def forward(self, visual: torch.Tensor, visual_mask: torch.Tensor = None,
-                x_text: torch.Tensor = None) -> dict:
+                x_text: torch.Tensor = None, ans_start=None, text_mask=None) -> dict:
         bsz = visual.shape[0]
         kpm = (visual_mask == 0) if visual_mask is not None else None
         qs = self.queries.unsqueeze(0).expand(bsz, -1, -1)
         if self.qcond and x_text is not None:
             if x_text.shape[0] == bsz:
-                q_txt = self.qc_proj(self.qc_norm(x_text.float().mean(dim=1, keepdim=True))).to(qs.dtype)
+                q_list = []
+                for b_i in range(bsz):
+                    a0 = max(1, min(int(ans_start[b_i]), x_text.shape[1])) if ans_start is not None and b_i < len(ans_start) else x_text.shape[1]
+                    xb = x_text[b_i, :a0].float()
+                    if text_mask is not None and text_mask.shape[0] == bsz and text_mask.shape[1] == x_text.shape[1]:
+                        mb = text_mask[b_i, :a0].to(xb.dtype).unsqueeze(-1)
+                        den = mb.sum().clamp(min=1.0)
+                        q_list.append((xb * mb).sum(dim=0, keepdim=True) / den)
+                    else:
+                        q_list.append(xb.mean(dim=0, keepdim=True))
+                q_mean = torch.stack(q_list, dim=0)
+                q_txt = self.qc_proj(self.qc_norm(q_mean)).to(qs.dtype)
                 qs = qs + q_txt
 
         if not self.multifreq:
@@ -179,7 +190,7 @@ class LayerVRMG(nn.Module):
                 anc, _ = self.anc_pool(aq, ak, av, key_padding_mask=kpm, need_weights=False)
                 out["hybrid"] = (self, anc, {})
         if self.prompt_alpha != 1.0 or self.hyb_bound > 0.0:
-            out["cfg"] = (self.prompt_alpha, self.hyb_bound)
+            out["cfg"] = (self.prompt_alpha, self.hyb_bound, ans_start)
         return out
 
     def apply_tokrot(self, xr: torch.Tensor, x_raw: torch.Tensor, proj_name: str,
@@ -278,10 +289,26 @@ class RotatedLinear(nn.Module):
         if tokrot is not None:
             vrmg, tk, tv, kpm, tcache = tokrot
             xr = vrmg.apply_tokrot(xr, x, self.proj_name, tk, tv, kpm, tcache)
+        alpha_1d = None
+        if cfg is not None and seq > 1 and cfg[0] < 1.0:
+            pa = cfg[0]
+            ans_start = cfg[2] if len(cfg) > 2 else None
+            alpha_1d = torch.full((bsz, seq), pa, device=x.device, dtype=x.dtype)
+            if ans_start is not None:
+                for b_i, a0 in enumerate(ans_start):
+                    p0 = max(0, int(a0) - 1)
+                    if b_i < bsz and p0 < seq:
+                        alpha_1d[b_i, p0:] = 1.0
+            else:
+                # 左侧补齐的评测 prefill：最后一个位置即 Answer: 预测位，保持 1.0
+                alpha_1d[:, -1:] = 1.0
+            xr = xb + alpha_1d.unsqueeze(-1).unsqueeze(-1) * (xr - xb)
         out_in = xr.reshape(bsz, seq, dim)
         if hybrid is not None:
             vrmg, anc, hcache = hybrid
             dx = vrmg.apply_hybrid(x, anc, hcache)
             if dx is not None:
+                if alpha_1d is not None:
+                    dx = dx * alpha_1d.unsqueeze(-1)
                 out_in = out_in + dx
         return self.base(out_in)

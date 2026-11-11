@@ -1,0 +1,240 @@
+{
+ "name": "v5_proj_llava",
+ "mode": "proj",
+ "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v5/v5_proj_llava.pt",
+ "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+ "arch": {
+  "proj": "proj"
+ },
+ "args": {
+  "mode": "proj",
+  "ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v5/v5_proj_llava.pt",
+  "name": "v5_proj_llava",
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "benches": "mmstar,hallusion,chartqa,ocrbench,mathvista,geometry3k",
+  "limit": 0,
+  "bs": 8,
+  "max_pixels": 153664,
+  "max_new": 24,
+  "image_ctrl": "none",
+  "force_gen": false,
+  "flags": "",
+  "prompt_alpha": null,
+  "hyb_bound": null,
+  "out_dir": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v5/eval",
+  "selftest": false,
+  "check_data": false
+ },
+ "benches": {
+  "mmstar": {
+   "n": 1500,
+   "hits": 452,
+   "acc": 0.30133333333333334,
+   "ci95": [
+    0.27864459234432143,
+    0.32503707200117876
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "coarse perception": {
+     "n": 250,
+     "acc": 0.292
+    },
+    "fine-grained perception": {
+     "n": 250,
+     "acc": 0.32
+    },
+    "instance reasoning": {
+     "n": 250,
+     "acc": 0.284
+    },
+    "logical reasoning": {
+     "n": 250,
+     "acc": 0.284
+    },
+    "math": {
+     "n": 250,
+     "acc": 0.368
+    },
+    "science & technology": {
+     "n": 250,
+     "acc": 0.26
+    }
+   },
+   "cal_acc": 0.2853333333333333,
+   "cal_acc_n": 1500,
+   "seconds": 35.72856831550598
+  },
+  "hallusion": {
+   "n": 951,
+   "hits": 527,
+   "acc": 0.5541535226077813,
+   "ci95": [
+    0.5224067711446209,
+    0.5854645239476751
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "VD": {
+     "n": 591,
+     "acc": 0.544839255499154
+    },
+    "VS": {
+     "n": 360,
+     "acc": 0.5694444444444444
+    }
+   },
+   "pred_yes_rate": 0.19453207150368035,
+   "pred_no_rate": 0.8054679284963197,
+   "yes_acc": 0.20199501246882792,
+   "no_acc": 0.8109090909090909,
+   "balanced_acc": 0.5064520516889595,
+   "cal_acc": 0.5120925341745531,
+   "cal_acc_n": 951,
+   "seconds": 35.854572057724
+  },
+  "chartqa": {
+   "n": 2500,
+   "hits": 260,
+   "acc": 0.104,
+   "ci95": [
+    0.09263511926485972,
+    0.11658003236454047
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "human_or_machine=0": {
+     "n": 1250,
+     "acc": 0.132
+    },
+    "human_or_machine=1": {
+     "n": 1250,
+     "acc": 0.076
+    }
+   },
+   "eos_stop_rate": 0.9996,
+   "avg_gen_tokens": 4.7,
+   "rep3_rate": 0.0,
+   "seconds": 115.59852528572083
+  },
+  "ocrbench": {
+   "n": 1000,
+   "hits": 12,
+   "acc": 0.012,
+   "ci95": [
+    0.006877579092159561,
+    0.020857473928157594
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "Artistic Text Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Digit String Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Doc-oriented VQA": {
+     "n": 200,
+     "acc": 0.045
+    },
+    "Handwriting Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Handwritten Mathematical Expression Recognition": {
+     "n": 100,
+     "acc": 0.0
+    },
+    "Irregular Text Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Key Information Extraction": {
+     "n": 200,
+     "acc": 0.0
+    },
+    "Non-Semantic Text Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Regular Text Recognition": {
+     "n": 50,
+     "acc": 0.0
+    },
+    "Scene Text-centric VQA": {
+     "n": 200,
+     "acc": 0.015
+    }
+   },
+   "score_1000": 12.0,
+   "eos_stop_rate": 0.92,
+   "avg_gen_tokens": 6.018,
+   "rep3_rate": 0.0,
+   "seconds": 43.69947910308838
+  },
+  "mathvista": {
+   "n": 1000,
+   "hits": 244,
+   "acc": 0.244,
+   "ci95": [
+    0.21839238069189443,
+    0.27156699138433754
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "free_form/float": {
+     "n": 40,
+     "acc": 0.0
+    },
+    "free_form/integer": {
+     "n": 418,
+     "acc": 0.0645933014354067
+    },
+    "free_form/list": {
+     "n": 2,
+     "acc": 0.0
+    },
+    "multi_choice/text": {
+     "n": 540,
+     "acc": 0.40185185185185185
+    }
+   },
+   "pred_yes_rate": 0.504424778761062,
+   "pred_no_rate": 0.49557522123893805,
+   "yes_acc": 0.40782122905027934,
+   "no_acc": 0.3407821229050279,
+   "balanced_acc": 0.3743016759776536,
+   "cal_acc": 0.3962962962962963,
+   "cal_acc_n": 540,
+   "eos_stop_rate": 1.0,
+   "avg_gen_tokens": 3.380434782608696,
+   "rep3_rate": 0.0,
+   "seconds": 55.18883752822876
+  },
+  "geometry3k": {
+   "n": 601,
+   "hits": 31,
+   "acc": 0.051580698835274545,
+   "ci95": [
+    0.03657316077868203,
+    0.0722844310271726
+   ],
+   "empty_rate": 0.0,
+   "by_cat": {
+    "geometry3k": {
+     "n": 601,
+     "acc": 0.051580698835274545
+    }
+   },
+   "eos_stop_rate": 1.0,
+   "avg_gen_tokens": 3.725457570715474,
+   "rep3_rate": 0.0,
+   "seconds": 21.194447994232178
+  }
+ },
+ "seconds": 312.7828574180603,
+ "peak_gib": 6.358091831207275,
+ "note": "对齐训练格式的规则判分（选择题/判断题用候选对数似然，开放题贪心解码+防复读）；图片缩放到 ≤max_pixels"
+}

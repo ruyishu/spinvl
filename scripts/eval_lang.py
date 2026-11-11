@@ -97,11 +97,11 @@ def merge_into(model, front, mode, K):
             if mode in ("rot", "rots"):
                 R = front.static._R[(li, n)][0].float()  # (nb, b, b)
                 nb, b = R.shape[0], R.shape[1]
-                Wb = W.reshape(W.shape[0], nb, b)
-                Wn = torch.einsum("onk,njk->onj", Wb, R).reshape(W.shape)  # W_block @ R^T
                 if mode == "rots":
                     d_vec = front.static.scale[f"{li}_{n}"].float()
-                    Wn = Wn * d_vec.unsqueeze(0)
+                    W = W * d_vec.unsqueeze(0)
+                Wb = W.reshape(W.shape[0], nb, b)
+                Wn = torch.einsum("onk,njk->onj", Wb, R).reshape(W.shape)  # (W @ D)_block @ R^T
                 lin.weight.data = Wn.to(lin.weight.dtype)
             else:
                 key = f"{li}_{n}"

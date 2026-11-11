@@ -76,31 +76,39 @@ accuracy collapses.
 
 \textbf{Step~2: online policy distillation.} Offline teacher forcing trains
 the model only on ground-truth prefixes. We therefore let the student roll out
-its own answers and ask a stronger VLM to score exactly those tokens with a
-full-vocabulary forward KL, anchored by a gold cross-entropy term. Five
-hundred steps suffice to raise free-form generation by $+4.1$ to $+9.9$
-points across benchmarks and to bring end-of-sequence termination above
-$95\%$.
+its own answers and ask a stronger VLM to score those trajectories token by
+token, anchored by a gold cross-entropy term. Five hundred steps suffice to
+raise $0.6$B free-form generation by $+4.7$ to $+9.9$ points across benchmarks,
+lift $1.7$B tower-free perception and anti-hallucination on the base mixture from
+$40.21\%$ to $42.46\%$, and keep end-of-sequence termination at $87\%$--$99\%$
+versus $59\%$ for mode-seeking reverse KL.
 
-\textbf{Controlled evidence.} All models in our main table share the same
-frozen base model, the same training mixture, and the same optimisation
-budget; the token-concatenation baseline is retrained by us rather than quoted.
-Under this protocol \modelname{} improves the average of perception and
-anti-hallucination from $41.35\%$ to $44.37\%$ without any visual token in the
-backbone, reaches $35.90\%$ on the average of perception, hallucination and
-mathematical reasoning against $35.87\%$ for the token-concatenation
-baseline, and, in the tower-free configuration, retains $97.4\%$ of that
-baseline's score while using $74.2\%$ fewer FLOPs and running $19.5\%$ faster
-at high resolution.
+\textbf{Controlled evidence.} All models in our comparison are grouped by exact
+training mixture ($21$k base, $28$k +open, and a $44$k deduplicated,
+label-balanced mixture) and evaluated at the same seed ($s{=}0$) and resolution
+($392{\times}392$); the token-concatenation baseline is retrained by us on each
+mixture rather than quoted. On the $21$k base mixture, \modelname-Tower{}
+improves the average of perception and anti-hallucination (MC2) from $41.35\%$
+to $44.37\%$ without any visual token in the backbone, while tower-free
+\modelname-Free{}+VL-OPD reaches $42.46\%$ MC2 and $34.91\%$ Core3 ($97.3\%$ of
+the $21$k concatenation baseline's $35.87\%$). On the $28$k +open mixture,
+\modelname-Tower{} (\texttt{mf}+VL-OPD) reaches $35.90\%$ Core3 against $36.14\%$
+($99.3\%$) for the $28$k concatenation baseline, while tower-free
+\modelname-Free{} uses $74.2\%$ fewer FLOPs and runs $19.5\%$ faster at
+$4096$ patches.
 
-Finally, we characterise the limits of the paradigm instead of hiding them.
-By re-training the concatenation baseline on identical data that includes
-open-ended chart and document questions, we show that its accuracy on
-character-level chart reading and OCR stays flat ($10.32\%$ and $1.10\%$),
-while our model stays in the low single digits; adding the same data doubles
-our geometry accuracy. Operator-level modulation therefore buys semantic
-perception, hallucination resistance and diagram reasoning, but not dense
-transcription, which appears to require per-position key-value addressing.
+Finally, we characterise the limits of the paradigm through both a format
+boundary study and an image-perturbation diagnostic (real vs.\ cross-image
+derangement and blank controls). Retraining the concatenation baseline on open
+chart and document questions leaves its character-level chart reading and OCR
+accuracy flat ($10.32\%$ and $1.10\%$), while our model stays in the low single
+digits; adding the same data doubles our geometry accuracy ($1.83\%\to3.83\%$).
+On our $44$k deduplicated and class-balanced mixture, \modelname-Tower{} expands
+the held-out validation visual grounding gap by $+53\%$ over single-frequency
+rotation ($1.37$ vs.\ $0.90$ nats) and yields $+3.05$ points of
+real-over-shuffled gain on HallusionBench ($+7.15$ over blank), while showing
+that zero-shot MMStar perturbations remain small across all frozen-backbone
+methods---including full-token LLaVA---at this data scale.
 
 Our contributions are:
 \begin{itemize}

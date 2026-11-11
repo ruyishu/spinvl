@@ -43,15 +43,21 @@ def get_image(it, max_pixels):
 
 
 def _parse_opts(opts):
-    opts, pos, start = opts.strip(), [], 0
+    import re
+    opts = opts.strip()
+    pos, start = [], 0
     for l in "ABCD":
-        pat = "A: " if l == "A" else f", {l}: "
-        i = opts.find(pat, start)
-        if i < 0:
+        if l == "A":
+            m = re.search(r"^\s*(?:A\s*[:.]|\(A\))\s*", opts[start:])
+        else:
+            m = re.search(rf"(?:[,;\n]\s*|\s+)(?:{l}\s*[:.]|\({l}\))\s*", opts[start:])
+        if not m:
             break
-        pos.append((i, i + len(pat)))
-        start = i + len(pat)
-    return [opts[j : (pos[k + 1][0] if k + 1 < len(pos) else len(opts))].strip() for k, (i, j) in enumerate(pos)]
+        i = start + m.start()
+        j = start + m.end()
+        pos.append((i, j))
+        start = j
+    return [opts[j : (pos[k + 1][0] if k + 1 < len(pos) else len(opts))].strip().rstrip(",;") for k, (i, j) in enumerate(pos)]
 
 
 def load_mmstar():
@@ -63,19 +69,31 @@ def load_mmstar():
         ix = {h: i for i, h in enumerate(next(rd))}
         for row in rd:
             q, ans = row[ix["question"]], row[ix["answer"]].strip()
-            if "\nOptions:" in q:
-                stem, _, opts = q.partition("\nOptions:")
+            m_opt = re.search(r"(?:\n|\s+)Options:\s*", q)
+            m_ch = re.search(r"(?:\n|\s+)Choices:\s*", q)
+            m_in = re.search(r"\n\s*\(A\)\s*", q)
+            if m_opt:
+                stem, opts = q[:m_opt.start()], q[m_opt.end():]
                 choices = _parse_opts(opts)
-            elif "\nChoices:\n" in q:
-                stem, _, opts = q.partition("\nChoices:\n")
-                stem = re.sub(r"^Hint:.*?\nQuestion:\s*", "", stem.strip(), flags=re.S)
-                choices = [re.sub(r"^\([A-Za-z]\)\s*", "", ln.strip()) for ln in opts.strip().splitlines() if ln.strip()]
+            elif m_ch:
+                stem, opts = q[:m_ch.start()], q[m_ch.end():]
+                lines = [ln.strip() for ln in opts.strip().splitlines() if ln.strip()]
+                if len(lines) >= 2:
+                    choices = [re.sub(r"^(?:\([A-Za-z]\)|[A-Za-z][.:])\s*", "", ln) for ln in lines]
+                else:
+                    choices = _parse_opts(opts)
+            elif m_in:
+                stem, opts = q[:m_in.start()], q[m_in.start():]
+                lines = [ln.strip() for ln in opts.strip().splitlines() if ln.strip()]
+                choices = [re.sub(r"^(?:\([A-Za-z]\)|[A-Za-z][.:])\s*", "", ln) for ln in lines]
             else:
-                stem, choices = q, []
+                stem, choices = q, _parse_opts(q)
+            stem = re.sub(r"^Hint:.*?\nQuestion:\s*", "", stem.strip(), flags=re.S)
             gi = ord(ans[0].upper()) - 65 if ans else -1
             ok = len(choices) >= 2 and 0 <= gi < len(choices)
-            items.append({"id": f"mmstar:{row[ix['index']]}", "prompt": mc_prompt(stem.strip(), choices) if ok else qa_prompt(q.strip()),
-                          "choices": choices if ok else [], "gold_idx": gi if ok else -1, "golds": [ans],
+            assert ok, f"MMStar choice parse failed on index={row[ix['index']]}: ans={ans!r} choices={choices!r} q={q!r}"
+            items.append({"id": f"mmstar:{row[ix['index']]}", "prompt": mc_prompt(stem.strip(), choices),
+                          "choices": choices, "gold_idx": gi, "golds": [ans],
                           "cat": row[ix["category"]], "img_bytes": base64.b64decode(row[ix["image"]])})
     return items
 

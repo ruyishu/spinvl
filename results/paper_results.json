@@ -375,5 +375,359 @@
       "mc2": 42.68,
       "core3": 34.95
     }
+  },
+  "clean_v5_debiased_44k": {
+    "re_teacher_qwen3vl8b": {
+      "mmstar": 66.73,
+      "hallusion": 72.66,
+      "chartqa": 72.56,
+      "ocrbench": 73.5,
+      "mathvista": 62.5,
+      "geometry3k": 7.15
+    },
+    "re_teacher_qwen3vl8b_shuffle": {
+      "mmstar": 29.53,
+      "hallusion": 57.1,
+      "chartqa": 10.12,
+      "ocrbench": 1.6,
+      "mathvista": 33.2,
+      "geometry3k": 2.33
+    },
+    "v5_free_lora_K4": {
+      "mmstar": 28.4,
+      "hallusion": 51.84,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 19.1,
+      "geometry3k": 1.66
+    },
+    "v5_free_lora_K4_shuffle": {
+      "mmstar": 28.27,
+      "hallusion": 53.73,
+      "chartqa": 1.4,
+      "ocrbench": 0.0,
+      "mathvista": 21.9,
+      "geometry3k": 1.33
+    },
+    "v5_free_none_K0": {
+      "mmstar": 26.07,
+      "hallusion": 55.63,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 19.8,
+      "geometry3k": 2.0
+    },
+    "v5_free_none_K0_shuffle": {
+      "mmstar": 26.53,
+      "hallusion": 56.47,
+      "chartqa": 1.32,
+      "ocrbench": 0.0,
+      "mathvista": 20.3,
+      "geometry3k": 2.5
+    },
+    "v5_free_opd_fwd_concise": {
+      "mmstar": 25.93,
+      "hallusion": 56.99,
+      "chartqa": 1.12,
+      "ocrbench": 0.0,
+      "mathvista": 17.1,
+      "geometry3k": 1.5
+    },
+    "v5_free_opd_fwd_concise_shuffle": {
+      "mmstar": 25.4,
+      "hallusion": 57.31,
+      "chartqa": 0.96,
+      "ocrbench": 0.0,
+      "mathvista": 18.2,
+      "geometry3k": 1.0
+    },
+    "v5_free_opd_fwd_frozen": {
+      "mmstar": 26.6,
+      "hallusion": 56.68,
+      "chartqa": 1.6,
+      "ocrbench": 0.0,
+      "mathvista": 19.4,
+      "geometry3k": 1.16
+    },
+    "v5_free_opd_fwd_frozen_fgen": {
+      "mmstar": 10.0,
+      "hallusion": 31.23,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 9.0,
+      "geometry3k": 1.16
+    },
+    "v5_free_opd_fwd_frozen_shuffle": {
+      "mmstar": 28.07,
+      "hallusion": 56.99,
+      "chartqa": 1.32,
+      "ocrbench": 0.0,
+      "mathvista": 18.5,
+      "geometry3k": 1.16
+    },
+    "v5_free_opd_fwd_tunebackbone": {
+      "mmstar": 27.2,
+      "hallusion": 56.36,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 18.8,
+      "geometry3k": 0.5
+    },
+    "v5_free_opd_fwd_tunebackbone_fgen": {
+      "mmstar": 11.4,
+      "hallusion": 30.91,
+      "chartqa": 1.0,
+      "ocrbench": 0.0,
+      "mathvista": 8.3,
+      "geometry3k": 0.5
+    },
+    "v5_free_opd_fwd_tunebackbone_shuffle": {
+      "mmstar": 27.67,
+      "hallusion": 56.57,
+      "chartqa": 1.04,
+      "ocrbench": 0.0,
+      "mathvista": 19.8,
+      "geometry3k": 1.16
+    },
+    "v5_free_opd_jsd": {
+      "mmstar": 26.33,
+      "hallusion": 54.99,
+      "chartqa": 1.56,
+      "ocrbench": 0.0,
+      "mathvista": 20.0,
+      "geometry3k": 1.33
+    },
+    "v5_free_opd_jsd_fgen": {
+      "mmstar": 10.07,
+      "hallusion": 30.49,
+      "chartqa": 1.56,
+      "ocrbench": 0.0,
+      "mathvista": 11.4,
+      "geometry3k": 1.16
+    },
+    "v5_free_opd_jsd_shuffle": {
+      "mmstar": 25.93,
+      "hallusion": 56.78,
+      "chartqa": 1.32,
+      "ocrbench": 0.0,
+      "mathvista": 18.5,
+      "geometry3k": 1.5
+    },
+    "v5_free_opd_seqkd": {
+      "mmstar": 26.13,
+      "hallusion": 55.42,
+      "chartqa": 1.52,
+      "ocrbench": 0.0,
+      "mathvista": 20.2,
+      "geometry3k": 1.0
+    },
+    "v5_free_opd_seqkd_fgen": {
+      "mmstar": 8.53,
+      "hallusion": 35.23,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 7.9,
+      "geometry3k": 1.0
+    },
+    "v5_free_opd_seqkd_shuffle": {
+      "mmstar": 25.07,
+      "hallusion": 56.47,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 20.2,
+      "geometry3k": 1.5
+    },
+    "v5_free_rots_K4_joint": {
+      "mmstar": 26.33,
+      "hallusion": 55.31,
+      "chartqa": 1.64,
+      "ocrbench": 0.0,
+      "mathvista": 20.2,
+      "geometry3k": 1.0
+    },
+    "v5_free_rots_K4_joint_fgen": {
+      "mmstar": 12.27,
+      "hallusion": 29.65,
+      "chartqa": 1.64,
+      "ocrbench": 0.0,
+      "mathvista": 9.3,
+      "geometry3k": 1.0
+    },
+    "v5_free_rots_K4_joint_shuffle": {
+      "mmstar": 24.73,
+      "hallusion": 56.68,
+      "chartqa": 1.44,
+      "ocrbench": 0.0,
+      "mathvista": 21.4,
+      "geometry3k": 1.16
+    },
+    "v5_free_rots_K4_open": {
+      "mmstar": 26.93,
+      "hallusion": 46.48,
+      "chartqa": 1.44,
+      "ocrbench": 0.0,
+      "mathvista": 19.5,
+      "geometry3k": 1.33
+    },
+    "v5_free_rots_K4_open_shuffle": {
+      "mmstar": 27.13,
+      "hallusion": 47.84,
+      "chartqa": 1.52,
+      "ocrbench": 0.0,
+      "mathvista": 16.8,
+      "geometry3k": 1.33
+    },
+    "v5_proj_fastv32": {
+      "mmstar": 27.6,
+      "hallusion": 54.57,
+      "chartqa": 9.96,
+      "ocrbench": 1.5,
+      "mathvista": 24.6,
+      "geometry3k": 4.83
+    },
+    "v5_proj_llava": {
+      "mmstar": 30.13,
+      "hallusion": 55.42,
+      "chartqa": 10.4,
+      "ocrbench": 1.2,
+      "mathvista": 24.4,
+      "geometry3k": 5.16
+    },
+    "v5_proj_llava_shuffle": {
+      "mmstar": 29.93,
+      "hallusion": 54.05,
+      "chartqa": 10.32,
+      "ocrbench": 1.0,
+      "mathvista": 24.1,
+      "geometry3k": 4.99
+    },
+    "v5_proj_pool32": {
+      "mmstar": 30.47,
+      "hallusion": 53.73,
+      "chartqa": 9.76,
+      "ocrbench": 1.5,
+      "mathvista": 24.4,
+      "geometry3k": 4.99
+    },
+    "v5_tower_mf": {
+      "mmstar": 29.87,
+      "hallusion": 51.95,
+      "chartqa": 1.08,
+      "ocrbench": 0.0,
+      "mathvista": 18.3,
+      "geometry3k": 2.16
+    },
+    "v5_tower_mf_hyb": {
+      "mmstar": 27.4,
+      "hallusion": 47.32,
+      "chartqa": 1.68,
+      "ocrbench": 0.0,
+      "mathvista": 19.0,
+      "geometry3k": 1.5
+    },
+    "v5_tower_mf_hyb_qcond": {
+      "mmstar": 27.53,
+      "hallusion": 53.63,
+      "chartqa": 0.96,
+      "ocrbench": 0.0,
+      "mathvista": 19.0,
+      "geometry3k": 0.83
+    },
+    "v5_tower_mf_hyb_qcond_shuffle": {
+      "mmstar": 28.53,
+      "hallusion": 56.05,
+      "chartqa": 1.32,
+      "ocrbench": 0.0,
+      "mathvista": 19.5,
+      "geometry3k": 1.5
+    },
+    "v5_tower_mf_hyb_shuffle": {
+      "mmstar": 28.73,
+      "hallusion": 45.85,
+      "chartqa": 1.64,
+      "ocrbench": 0.0,
+      "mathvista": 19.3,
+      "geometry3k": 1.0
+    },
+    "v5_tower_mf_shuffle": {
+      "mmstar": 30.4,
+      "hallusion": 51.0,
+      "chartqa": 1.04,
+      "ocrbench": 0.0,
+      "mathvista": 19.6,
+      "geometry3k": 2.33
+    },
+    "v5_tower_opd_fwd": {
+      "mmstar": 24.73,
+      "hallusion": 56.68,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 19.4,
+      "geometry3k": 0.5
+    },
+    "v5_tower_opd_fwd_shuffle": {
+      "mmstar": 26.93,
+      "hallusion": 54.26,
+      "chartqa": 1.16,
+      "ocrbench": 0.1,
+      "mathvista": 19.1,
+      "geometry3k": 1.0
+    },
+    "v5_tower_rose": {
+      "mmstar": 28.73,
+      "hallusion": 46.16,
+      "chartqa": 1.08,
+      "ocrbench": 0.0,
+      "mathvista": 18.7,
+      "geometry3k": 1.0
+    },
+    "v5_tower_rose_blank": {
+      "mmstar": 29.6,
+      "hallusion": 42.17,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 20.5,
+      "geometry3k": 0.83
+    },
+    "v5_tower_rose_shuffle": {
+      "mmstar": 28.53,
+      "hallusion": 45.74,
+      "chartqa": 1.24,
+      "ocrbench": 0.0,
+      "mathvista": 19.4,
+      "geometry3k": 0.83
+    },
+    "v5_tower_spinvl_full": {
+      "mmstar": 27.53,
+      "hallusion": 55.31,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 19.0,
+      "geometry3k": 1.33
+    },
+    "v5_tower_spinvl_full_blank": {
+      "mmstar": 23.73,
+      "hallusion": 48.16,
+      "chartqa": 1.2,
+      "ocrbench": 0.0,
+      "mathvista": 19.4,
+      "geometry3k": 1.0
+    },
+    "v5_tower_spinvl_full_shuffle": {
+      "mmstar": 28.73,
+      "hallusion": 52.26,
+      "chartqa": 1.12,
+      "ocrbench": 0.0,
+      "mathvista": 19.2,
+      "geometry3k": 1.0
+    },
+    "v5_tower_spinvl_open": {
+      "mmstar": 26.47,
+      "hallusion": 55.94,
+      "chartqa": 1.16,
+      "ocrbench": 0.0,
+      "mathvista": 19.3,
+      "geometry3k": 1.5
+    }
   }
 }

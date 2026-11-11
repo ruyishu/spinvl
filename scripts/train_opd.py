@@ -55,11 +55,13 @@ def stop_ids(tok):
     return sorted(x for x in s if x is not None)
 
 
-def cut_at_stop(row, stops):
-    """取生成行里第一个停止 token 之前的真实 token id 序列（不含停止符）。"""
+def cut_at_stop(row, stops, include_stop=False):
+    """截取真实生成 token；在线 KL 用 include_stop=True 保留自然 EOS，评测解码默认去掉。"""
     out = []
     for t in row.tolist():
         if t in stops:
+            if include_stop:
+                out.append(t)
             break
         out.append(t)
     return out
@@ -75,7 +77,7 @@ def tf_accuracy(model, registry, tok, data, idx, dev, n_acc=100):
         a0, na = data["a_rel_start"][i], data["n_answer"][i]
         vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
         vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
+        with rotation_context_with(registry, vis, vm, ans_start=[a0], text_mask=torch.ones(1, len(tid), device=dev)):
             lg = model(input_ids=torch.tensor([tid], device=dev)).logits[0].float()
         preds = [lg[a0 - 1 + k].argmax().item() for k in range(na)]
         first += int(preds[0] == tid[a0])
@@ -109,7 +111,7 @@ def greedy_em(model, registry, tok, data, idx, dev, n=100, max_new=32, boxed=Fal
         ids = tok(data["prompts"][i])["input_ids"]
         vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
         vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
+        with rotation_context_with(registry, vis, vm, text_mask=torch.ones(1, len(ids), device=dev)):
             out = model.generate(input_ids=torch.tensor([ids], device=dev), max_new_tokens=max_new,
                                  do_sample=False, pad_token_id=tok.pad_token_id,
                                  eos_token_id=sorted(stops))
@@ -146,7 +148,8 @@ def build_teacher_batch(proc, prompts, pids, gids, imgs, dev, pad_id):
     第 j 个 rollout token 位于第 Lp+j 列，预测它的 logits 在第 Lp-1+j 列（Lp=前缀含左填充的列数）。
     bad[k]=True 表示老师前缀末尾与学生 prompt 的 token 不一致（理论上不会发生，发生时该样本不进 KL）。
     """
-    texts = [VISION_PREFIX + p for p in prompts]
+    concise_inst = "Answer concisely with only the final word, number, or option letter.\n"
+    texts = [VISION_PREFIX + concise_inst + p for p in prompts]
     if getattr(build_teacher_batch, "boxed", False):
         inst = ("Solve the geometry problem with a short derivation, "
                 "then output the final answer as \\boxed{...}.\n")
@@ -197,6 +200,8 @@ def main():
     ap.add_argument("--ce-weight", type=float, default=0.2, help="金标 prompt+答案+EOS 的 CE 锚点权重，0 关闭")
     ap.add_argument("--seq", type=int, default=160, help="金标 CE 的序列长度（同 P1）")
     ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--tune-backbone", action="store_true", help="OPD 同时更新学生 LLM 主干；默认仍只更新 VRMG")
+    ap.add_argument("--backbone-lr", type=float, default=1e-5)
     ap.add_argument("--n-eval", type=int, default=100, help="val 上评测的样本数（上限为 val 大小）")
     ap.add_argument("--n-test", type=int, default=0, help="test 上评测的样本数，0=全部")
     ap.add_argument("--eval-every", type=int, default=0, help="训练中途评测间隔，0=steps//3（至少 100）")
@@ -218,11 +223,10 @@ def main():
         paths.update(imgdata.parse_source(s)[1])
     data = tf.load_data(args.data)
     n = len(data["ids"])
-    order = list(range(n))
-    random.Random(0).shuffle(order)
-    n_val = max(64, n // 10)
-    val, train = order[:n_val], order[n_val:]
-    random.Random(args.seed).shuffle(train)
+    train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
+    train = [i for i in train if data["ids"][i] in paths]
+    val = [i for i in val if data["ids"][i] in paths]
+    assert train and val, "按图切分后可用 train/val 为空"
     tdata, tidx = None, []
     if args.test_data:
         tdata = tf.load_data(args.test_data)
@@ -259,6 +263,12 @@ def main():
     vparams = [p for m in vrmgs for p in m.parameters()]
     for p in vparams:
         p.requires_grad_(True)
+    bparams = []
+    if args.tune_backbone:
+        bparams = list(model.parameters())
+        for p in bparams:
+            p.requires_grad_(True)
+    all_params = vparams + [p for p in bparams if all(p is not q for q in vparams)]
 
     teacher = None
     if not args.eval_only:
@@ -267,7 +277,7 @@ def main():
         for p in teacher.parameters():
             p.requires_grad_(False)
     log(f"=== OPD steps={args.steps} bs={args.bs} max_new={args.max_new} min_new={args.min_new} lr={args.lr} "
-        f"ce_w={args.ce_weight} train={len(train)} val={len(val)} test={len(tidx)} ===")
+        f"tune_backbone={args.tune_backbone} split={split_info} ce_w={args.ce_weight} train={len(train)} val={len(val)} test={len(tidx)} ===")
 
     def run_eval(tag, with_test=True, n_val_tf=None, n_val_em=None):
         out = {}
@@ -284,7 +294,8 @@ def main():
     def save(res):
         with open(args.out + ".json", "w") as f:
             json.dump(res, f, indent=1, ensure_ascii=False)
-        torch.save({"state": [m.state_dict() for m in vrmgs], "args": a1}, args.out + ".pt")
+        torch.save({"state": [m.state_dict() for m in vrmgs], "args": a1,
+                    "backbone": model.state_dict() if args.tune_backbone else None}, args.out + ".pt")
 
     result = {"args": vars(args), "mid_eval": []}
     init = run_eval("INIT")
@@ -296,7 +307,9 @@ def main():
         save(result)
         log("OPD_DONE"); return
 
-    opt = torch.optim.AdamW(vparams, lr=args.lr, weight_decay=0.01)
+    opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr}] +
+                            ([{"params": [p for p in bparams if all(p is not q for q in vparams)], "lr": args.backbone_lr}]
+                             if bparams else []), weight_decay=0.01)
     eval_every = args.eval_every or max(args.steps // 3, 100)
     t0, hist, gn = time.time(), [], torch.zeros(())
     pad_id = tok.pad_token_id
@@ -315,12 +328,13 @@ def main():
         attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
         vis, vmask = pad_vis([data["vfeat"][i].float() for i in idx], dev)
 
-        with torch.no_grad(), rotation_context_with(registry, vis, vmask):
+        with torch.no_grad(), rotation_context_with(registry, vis, vmask,
+                                                   ans_start=[pad] * len(pids), text_mask=attn):
             gen = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=args.max_new,
                                  min_new_tokens=args.min_new, do_sample=args.gen_temp > 0,
                                  temperature=max(args.gen_temp, 1e-5), top_p=0.9, pad_token_id=pad_id,
                                  eos_token_id=stops)
-        gids = [cut_at_stop(gen[k, pad:], set(stops)) for k in range(len(idx))]
+        gids = [cut_at_stop(gen[k, pad:], set(stops), include_stop=True) for k in range(len(idx))]
 
         imgs = [Image.open(paths[data["ids"][i]]).convert("RGB") for i in idx]
         enc, Lp, bad = build_teacher_batch(proc, prompts, pids, gids, imgs, dev, pad_id)
@@ -337,7 +351,7 @@ def main():
                 tmask[k, : len(g)] = 1
         seq, smask = torch.cat([in_ids, tail], dim=1), torch.cat([attn, tmask], dim=1)
         pos = (smask.cumsum(-1) - 1).clamp(min=0)
-        with rotation_context_with(registry, vis, vmask):
+        with rotation_context_with(registry, vis, vmask, ans_start=[pad] * len(idx), text_mask=smask):
             s_lg = model(input_ids=seq, attention_mask=smask, position_ids=pos).logits[:, pad - 1 : pad - 1 + maxa]
         s_lg = s_lg.float()
 
@@ -356,7 +370,8 @@ def main():
         if args.ce_weight > 0:
             ids_g, mask_g, lab_g, vis_g, vm_g, *_ = tf.collate(idx, data, tok, args.seq, False)
             if bool((lab_g[:, 1:] != -100).any()):  # 整批标签都被截断时 CE 是 0/0=NaN，会把旋转参数写坏
-                with rotation_context_with(registry, vis_g.to(dev), vm_g.to(dev)):
+                with rotation_context_with(registry, vis_g.to(dev), vm_g.to(dev),
+                                           ans_start=[data["a_rel_start"][i] for i in idx], text_mask=mask_g.to(dev)):
                     lg_g = model(input_ids=ids_g.to(dev), attention_mask=mask_g.to(dev)).logits.float()
                 ce = F.cross_entropy(lg_g[:, :-1].reshape(-1, lg_g.shape[-1]), lab_g.to(dev)[:, 1:].reshape(-1))
                 loss = args.ce_weight * ce if loss is None else loss + args.ce_weight * ce
@@ -366,7 +381,7 @@ def main():
                      sum(len(g) for g in gids) / len(gids), sum(bad)))
         if micro < args.accum - 1:
             continue
-        gn = torch.nn.utils.clip_grad_norm_(vparams, 1.0)
+        gn = torch.nn.utils.clip_grad_norm_(all_params, 1.0)
         opt.step()
         if step % args.log_every == 0:
             h = hist[-args.log_every:]
