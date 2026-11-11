@@ -1,0 +1,67 @@
+paper/sections/0_abstract.tex
+  s_2218750ca2fee0::t_aeabadc32ca192 17-26
+paper/sections/0_abstract_wide.tex
+  s_2218750ca2fee0::t_a727419e36e715 20-29
+README.md
+  s_2218750ca2fee0::t_7bca3f00536702 59-91
+scripts/audit_results.py
+  s_53ba9d12fa15fe::t_7dfb2a587faf49 1-32
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_af83a5260a5931 10-13,16-23,25-33
+  s_2218750ca2fee0::t_ace1cf50fe089d 210,213,216,218-222,224-226,228-230,235-238,240-248,267-272,275-276,278,280-282,284-287,294-306,311-314,317-318,320,322,324-325,330-337
+  s_2218750ca2fee0::t_310ca4353b75db 323
+  s_2218750ca2fee0::t_56af4eb4beb489 538-540
+  s_2218750ca2fee0::t_759bd10cb3639b 426,435-440,445-446,450,455-459,476-494,497,502-505,519-528,534-537,541-549
+  s_2218750ca2fee0::t_1fe3352960f699 119
+  s_2218750ca2fee0::t_6dc6f224e22c16 288
+  s_2218750ca2fee0::t_c0e4ccb797aced 94-102,105-106,108,110-112,114-118,120,122-127,129-134,136-144,153-159,164-200
+  s_2218750ca2fee0::t_bf52487cbf8af5 135
+  s_2218750ca2fee0::t_76533e048b82a4 495-496,498-501
+  s_2218750ca2fee0::t_ab6a6ea420fbb3 326
+  s_2218750ca2fee0::t_a6b031eaf86395 529-533
+paper/sections/5_conclusion.tex
+  s_2218750ca2fee0::t_d5035eabc2c1d1 27-28
+  s_2218750ca2fee0::t_fee8fbb00cadf1 29
+  s_2218750ca2fee0::t_e6dad6ea85b72a 24-26,30-33,48-62
+paper/sections/2_related.tex
+  s_2218750ca2fee0::t_d0ea0fd46eb3a0 20
+scripts/verify_paper_numbers.py
+  s_2218750ca2fee0::t_b544367da6a0c5 148-155
+  s_2218750ca2fee0::t_d0f6928e41d79a 56
+  s_2218750ca2fee0::t_2a0abd443b7ebc 132-137,142-143
+  s_2218750ca2fee0::t_185f6714dca81e 44
+  s_2218750ca2fee0::t_2efa58340b3bf9 98
+  s_2218750ca2fee0::t_d1904d2f637793 96
+  s_2218750ca2fee0::t_0c275338c5a09d 1-43,45-55,57-78,80-95,97,99-131,138-141,144-147,156-162
+  s_2218750ca2fee0::t_b30ca07ccdec9c 79
+paper/sections/1_intro.tex
+  s_2218750ca2fee0::t_e319842350403a 79-84,86-98,100-105
+  s_2218750ca2fee0::t_44f4886c85bcaa 106-111
+scripts/plot_results.py
+  s_2218750ca2fee0::t_4a16605adf1c6e 39-44
+  s_2218750ca2fee0::t_478f963852737e 144-147,166,168-169,191,193-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "6c8d34869c95f1da16744ff611fa8c06dfc910a8",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    },
+    "s_53ba9d12fa15fe": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e5ae7c30-6175-400b-92ad-abd62fab2cfe",
+        "model": "grok-4.6"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
