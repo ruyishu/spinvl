@@ -1,0 +1,25 @@
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_22f0faa7822036 106
+  s_2218750ca2fee0::t_b92c029ba0a17c 492,509
+  s_2218750ca2fee0::t_c92fd1ee1cbfb3 278,293
+  s_2218750ca2fee0::t_c9330fb2b416c2 320-321,332
+  s_2218750ca2fee0::t_09a2587b21d21f 352-353,370
+  s_2218750ca2fee0::t_bbc918c256b61d 147
+  s_2218750ca2fee0::t_65db22455c2322 214-215,234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "b5eaf159d48d770509a4744ec4b016d1be788023",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
