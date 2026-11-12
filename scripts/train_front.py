@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
-from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
+from provenance import capture_run_inputs, build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from train_final import load_data, split_train_val_by_image as tf_split_by_image  # noqa: E402
 from wrap import attach_rotation, freeze_all_but  # noqa: E402
 
@@ -64,6 +64,7 @@ def main():
     ap.add_argument("--source", action="append", required=True, help="meta|manifest|img_root，可重复")
     ap.add_argument("--eval-source", action="append", default=[])
     ap.add_argument("--model", default=f"{B}/zk/model/Qwen3-1.7B")
+    ap.add_argument("--teacher", default=imgdata.TEACHER)
     ap.add_argument("--bs", type=int, default=16)
     ap.add_argument("--accum", type=int, default=1, help="梯度累积：每个优化步用 accum 个 bs 大小的微批")
     ap.add_argument("--steps", type=int, default=3000)
@@ -75,6 +76,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True, help="输出前缀，生成 <out>.log/.json/.pt")
     args = ap.parse_args()
+    capture_run_inputs(vars(args))
     torch.manual_seed(args.seed)
     dev = "cuda"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -83,7 +85,7 @@ def main():
     def log(m):
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
-    ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
+    ip = AutoProcessor.from_pretrained(args.teacher, trust_remote_code=True).image_processor
     data, paths, train_idx, val_idx, train_items, val_items, split_info = prepare_front_split(args.source, seed=args.seed)
     if args.n_val and args.n_val < len(val_items):
         val_eval_items = val_items[: args.n_val]

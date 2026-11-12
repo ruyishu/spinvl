@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 import train_final as tf  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
-from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
+from provenance import capture_run_inputs, build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -204,6 +204,7 @@ def main():
     ap.add_argument("--K", type=int, default=4)
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--model", default=f"{B}/zk/model/Qwen3-1.7B")
+    ap.add_argument("--teacher", default=imgdata.TEACHER)
     ap.add_argument("--seq", type=int, default=256)
     ap.add_argument("--bs", type=int, default=8)
     ap.add_argument("--accum", type=int, default=1, help="梯度累积：每个优化步用 accum 个 bs 大小的微批")
@@ -224,6 +225,7 @@ def main():
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    capture_run_inputs(vars(args))
     torch.manual_seed(args.seed)
     dev = "cuda"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -237,7 +239,7 @@ def main():
     val_em_1000, val_1000_sha1 = tf.select_stratified_val_1000(val, data, n_target=args.n_em, seed=0)
     assert train and val, "按图切分后可用 train/val 为空"
 
-    ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
+    ip = AutoProcessor.from_pretrained(args.teacher, trust_remote_code=True).image_processor
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, device_map=dev,
                                                  trust_remote_code=True).eval()

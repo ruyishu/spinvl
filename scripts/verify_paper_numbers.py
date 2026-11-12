@@ -1,5 +1,6 @@
 """Verify that every table row across all 8 tables in paper/sections/4_experiments.tex maps 1-to-1 to real JSON files on disk by parsing the actual LaTeX source file directly."""
 
+import argparse
 import json
 import pathlib
 import re
@@ -19,12 +20,12 @@ def load_b(path):
     mm = b["mmstar"]["acc"] * 100
     ha = b["hallusion"]["acc"] * 100
     mv = b["mathvista"]["acc"] * 100
-    cq = b.get("chartqa", {}).get("acc", 0.0) * 100
-    oc = b.get("ocrbench", {}).get("acc", 0.0) * 100
-    g3 = b.get("geometry3k", {}).get("acc", 0.0) * 100
+    cq = b["chartqa"]["acc"] * 100 if "chartqa" in b else None
+    oc = b["ocrbench"]["acc"] * 100 if "ocrbench" in b else None
+    g3 = b["geometry3k"]["acc"] * 100 if "geometry3k" in b else None
     mc2 = (mm + ha) / 2
     core3 = (mm + ha + mv) / 3
-    avg6 = (mm + ha + mv + cq + oc + g3) / 6
+    avg6 = (mm + ha + mv + cq + oc + g3) / 6 if all(x is not None for x in (cq, oc, g3)) else None
     return dict(mm=mm, ha=ha, mv=mv, cq=cq, oc=oc, g3=g3, mc2=mc2, core3=core3, avg6=avg6)
 
 
@@ -75,6 +76,15 @@ def parse_mean_std(cell_str: str):
 
 
 def main():
+    global ROOT, TEX_PATH, BENCH, TLOG, V5, PRES
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", type=pathlib.Path, default=ROOT)
+    ap.add_argument("--tex", type=pathlib.Path, help="Verify a separate TeX copy against --root results")
+    args = ap.parse_args()
+    ROOT = args.root.resolve()
+    TEX_PATH = args.tex.resolve() if args.tex else ROOT / "paper/sections/4_experiments.tex"
+    BENCH, TLOG, V5 = ROOT / "results/benchmarks", ROOT / "results/train_logs", ROOT / "results/clean_v5"
+    PRES = ROOT / "results/paper_results.json"
     tex_text = TEX_PATH.read_text(encoding="utf-8")
     checks = 0
 
@@ -156,12 +166,10 @@ def main():
             else:
                 vals = [x[k] for x in loaded]
                 mean_v = statistics.mean(vals)
-                std_p = statistics.pstdev(vals)
                 std_s = statistics.stdev(vals)
                 m_tex, s_tex = parse_mean_std(cells[idx])
                 assert_rounded(f"Tab2:{name}", f"{k}_mean", mean_v, str(m_tex), decimals=2)
-                if min(abs(std_p - s_tex), abs(std_s - s_tex)) > 0.02:
-                    raise AssertionError(f"[MISMATCH] Tab2:{name}.{k}_std: pstdev={std_p:.4f} stdev={std_s:.4f} vs tex={s_tex}")
+                assert_rounded(f"Tab2:{name}", f"{k}_sample_std_ddof1", std_s, str(s_tex), decimals=2)
                 checks += 2
 
     # 3. Table 3 (tab:front)

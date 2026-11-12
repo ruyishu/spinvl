@@ -103,6 +103,8 @@ def main():
         f"{PROJ_DIR}/data/open_supp_v2/shard*.meta.pt|{PROJ_DIR}/data/open_supp_v2/manifest.jsonl|{PROJ_DIR}/data/open_supp",
         f"{PROJ_DIR}/data/nat_supp/shard*.meta.pt|{PROJ_DIR}/data/nat_supp/manifest.jsonl|{PROJ_DIR}/data/nat_supp",
     ]
+    gate_args = {"data": data_spec, "source": sources, "model": f"{B}/zk/model/Qwen3-1.7B"}
+    prov.capture_run_inputs(gate_args)
     # 直接调用 train_front 与 train_joint 的真实入口函数
     data_f, paths_f, tr_f0, va_f0, tr_items_f0, va_items_f0, info_f0 = tfront.prepare_front_split(sources, seed=0)
     data_j, paths_j, tr_j0, va_j0, info_j0 = tj.prepare_joint_split(data_spec, sources, seed=0)
@@ -307,7 +309,7 @@ def main():
     print(f"[PASS] 5 & 6. A1 CA-only (grad={a1_grad_norm:.4f}, vis_diff={a1_vis_effect:.4f}), Frozen backbone (311/311 bit-exact), & text bypass verified.")
 
     # 7. 记录完整 manifest
-    report["manifest"] = prov.build_run_manifest("foundation_gate", {}, split_info,
+    report["manifest"] = prov.build_run_manifest("foundation_gate", gate_args, split_info,
                                                  extra={"val_1000_sha1": val_1000_sha1, "backbone_sha1": pre_bb_sha1})
     report["elapsed_seconds"] = time.time() - t0
     report["all_passed"] = True

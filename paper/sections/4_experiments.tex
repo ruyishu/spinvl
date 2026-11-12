@@ -208,7 +208,7 @@ $+0.75$ and $+4.39$ points of MC2 ($40.73\%$ and $44.37\%$ vs.\ $39.98\%$).
 \caption{\textbf{Cross-size behaviour and seed variance} (public benchmarks).
 $0.6$B models are competitive with $1.7$B baselines on perception; $8$B
 students do not benefit, since the frozen backbone is not the bottleneck.
-All single-run rows use $s{=}0$, and $3$-seed rows average $s\in\{0,1,2\}$.}
+All single-run rows use $s{=}0$, and $3$-seed rows average $s\in\{0,1,2\}$. Error bars are sample standard deviations ($\mathrm{ddof}{=}1$).}
 \label{tab:scale}
 \footnotesize
 \setlength{\tabcolsep}{2.4pt}
@@ -221,11 +221,11 @@ $0.6$B & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 26.40 & 57.73 & 20.20 & 42.06
 $0.6$B & Free (CE, $21$k, $s{=}0$)               & 28.07 & 54.68 & 20.40 & 41.37 & 34.38 & 18.03 \\
 $0.6$B & Free+OPD ($21$k, $s{=}0$)               & 28.87 & 54.47 & 19.00 & 41.67 & 34.11 & 17.69 \\
 $0.6$B & Free+OPD ($28$k, $s{=}0$)               & 27.53 & 57.83 & 18.60 & \textbf{42.68} & \textbf{34.66} & \textbf{18.05} \\
-$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36$_{\pm2.21}$ & \textbf{57.69}$_{\pm0.10}$ & 18.73$_{\pm0.09}$ & 41.52$_{\pm1.14}$ & 33.93$_{\pm0.74}$ & 17.62$_{\pm0.41}$ \\
+$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36$_{\pm2.70}$ & \textbf{57.69}$_{\pm0.12}$ & 18.73$_{\pm0.12}$ & 41.52$_{\pm1.39}$ & 33.93$_{\pm0.90}$ & 17.62$_{\pm0.51}$ \\
 \midrule
-$1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56$_{\pm1.21}$ & 56.36$_{\pm0.85}$ & 18.97$_{\pm0.97}$ & \textbf{41.46}$_{\pm0.62}$ & \textbf{33.96}$_{\pm0.48}$ & \textbf{17.68}$_{\pm0.35}$ \\
-$1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89}$_{\pm1.87}$ & 53.84$_{\pm1.04}$ & 19.00$_{\pm1.68}$ & 40.36$_{\pm0.68}$ & 33.24$_{\pm0.93}$ & 17.27$_{\pm0.36}$ \\
-$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm2.62}$ & 56.12$_{\pm1.42}$ & \textbf{19.13}$_{\pm0.82}$ & 41.11$_{\pm1.10}$ & 33.79$_{\pm0.86}$ & 17.49$_{\pm0.24}$ \\
+$1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56$_{\pm1.49}$ & 56.36$_{\pm1.04}$ & 18.97$_{\pm1.18}$ & \textbf{41.46}$_{\pm0.75}$ & \textbf{33.96}$_{\pm0.59}$ & \textbf{17.68}$_{\pm0.43}$ \\
+$1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89}$_{\pm2.28}$ & 53.84$_{\pm1.27}$ & 19.00$_{\pm2.05}$ & 40.36$_{\pm0.83}$ & 33.24$_{\pm1.14}$ & 17.27$_{\pm0.44}$ \\
+$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm3.21}$ & 56.12$_{\pm1.74}$ & \textbf{19.13}$_{\pm1.00}$ & 41.11$_{\pm1.35}$ & 33.79$_{\pm1.05}$ & 17.49$_{\pm0.30}$ \\
 \midrule
 $8$B   & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 25.67 & 54.15 & 19.90 & 39.91 & 33.24 & 17.30 \\
 $8$B   & Free (\texttt{hyb}, $28$k, $s{=}0$)     & 24.80 & \textbf{56.99} & 19.20 & \textbf{40.90} & \textbf{33.66} & \textbf{17.50} \\
@@ -236,7 +236,7 @@ $8$B   & Free+OPD ($28$k, $s{=}0$)               & \textbf{27.40} & 53.31 & 18.1
 
 Tab.~\ref{tab:scale} reports the same pipelines with $0.6$B and $8$B students,
 as well as three-seed averages ($s\in\{0,1,2\}$) on the $28$k +open mixture.
-A $0.6$B tower-free model reaches $42.68\%$ MC2 at $s{=}0$ ($41.52\%{\pm}1.14\%$
+A $0.6$B tower-free model reaches $42.68\%$ MC2 at $s{=}0$ ($41.52\%{\pm}1.39\%$
 across three seeds), matching the $1.7$B models on perception and
 hallucination; the smallest student is therefore already sufficient for the
 abilities this paradigm provides. On $1.7$B (+open, $3$ seeds), online

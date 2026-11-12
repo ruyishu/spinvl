@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
+from provenance import capture_run_inputs, build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -468,6 +468,7 @@ def main():
     train, val, split_info = split_train_val_by_image(data, None, seed=args.seed)
     if args.limit:
         train = train[: args.limit]
+    capture_run_inputs(vars(args))
     torch.manual_seed(args.seed)
 
     dev = "cuda"

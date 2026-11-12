@@ -67,14 +67,14 @@ class Runner:
         if mode == "base":
             self.arch = {"base": True, "model_path": model_path}
             return
-        ck = torch.load(ckpt, map_location=dev)
+        ck = torch.load(ckpt, map_location="cpu", weights_only=False)
         if mode in ("tower", "tower_free"):
             if mode == "tower":
                 a1, ja, K, front_mode = ck["args"], {}, 0, "none"
                 states = ck["state"]
             else:
                 ja = ck["args"]
-                a1 = torch.load(ja["vrmg_ckpt"], map_location=dev)["args"]
+                a1 = torch.load(ja["vrmg_ckpt"], map_location="cpu", weights_only=False)["args"]
                 front_mode = ja.get("front_mode", "rots")
                 K = 0 if front_mode == "none" else int(ja.get("K", 4))
                 states = ck["vrmg"]
@@ -129,7 +129,10 @@ class Runner:
     def _vision_feats(self, pv, grid, lens):
         rows = torch.cat([pv[k, : lens[k]] for k in range(len(lens))], dim=0)
         o = self.vision(rows.to(self.dev), grid_thw=grid.to(self.dev))
-        vf = (o[0] if isinstance(o, (tuple, list)) else o).float()
+        vf = getattr(o, "pooler_output", None)
+        if vf is None:
+            vf = o[0] if isinstance(o, (tuple, list)) else o
+        vf = vf.float()
         merge = getattr(self.vision.config, "spatial_merge_size", None) or getattr(self.vision.config, "merge_size", 2)
         counts = [int(g[0] * g[1] * g[2] // (merge * merge)) for g in grid.tolist()]
         assert sum(counts) == vf.shape[0], f"视觉 token 数对不上：{sum(counts)} vs {vf.shape[0]}"

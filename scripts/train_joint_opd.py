@@ -30,7 +30,7 @@ import train_final as tf  # noqa: E402
 import train_joint as tj  # noqa: E402
 import train_opd as topd  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
-from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
+from provenance import capture_run_inputs, build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -84,6 +84,7 @@ def main():
     args = ap.parse_args()
     if args.tune_backbone:
         raise ValueError("当前冻结主线严禁启用 --tune-backbone！原始 LLM 必须全程 100% 冻结。")
+    capture_run_inputs(vars(args))
     torch.manual_seed(args.seed)
     dev = "cuda"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

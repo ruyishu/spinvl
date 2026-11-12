@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_data as bd  # noqa: E402
 import bench_score as bs  # noqa: E402
-from provenance import build_run_manifest, fast_file_sha256  # noqa: E402
+from provenance import capture_run_inputs, build_run_manifest, fast_file_sha256  # noqa: E402
 
 ROOT = bd.B + "/zk/project/rose-distill"
 
@@ -75,6 +75,7 @@ def main():
     ap.add_argument("--ckpt", default="")
     ap.add_argument("--name")
     ap.add_argument("--model", default=f"{bd.B}/zk/model/Qwen3-1.7B")
+    ap.add_argument("--teacher", default=f"{bd.B}/zk/model/Qwen3-VL-8B-Instruct")
     ap.add_argument("--benches", default=",".join(bd.BENCHES))
     ap.add_argument("--limit", type=int, default=0, help="每榜只测前 N 题（冒烟用），0=全量")
     ap.add_argument("--bs", type=int, default=8)
@@ -96,12 +97,30 @@ def main():
         return bd.check_data(args.limit)
     assert args.mode and args.name and (args.ckpt or args.mode in ("base", "teacher")), "需要 --mode --ckpt --name"
 
+    assets = []
+    raw_files = {
+        "mmstar": bd.RAW + "/MMStar/MMStar.tsv",
+        "hallusion": bd.RAW + "/HallusionBench/image-00000-of-00001.parquet",
+        "chartqa": bd.RAW + "/ChartQA/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet",
+        "ocrbench": bd.RAW + "/OCRBench/test-00000-of-00001.parquet",
+    }
+    for bench in args.benches.split(","):
+        if bench in raw_files:
+            assets.append(raw_files[bench])
+        else:
+            filename = "mathvista_testmini" if bench == "mathvista" else "geometry3k_test"
+            manifest_path = Path(bd.MV) / (filename + ".jsonl")
+            assets.append(str(manifest_path))
+            assets.extend(str(Path(bd.MV) / json.loads(line)["image"])
+                          for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip())
+    args.benchmark_assets = sorted(set(assets))
+    capture_run_inputs(vars(args))
     import torch
     from bench_models import Runner
 
     os.makedirs(args.out_dir, exist_ok=True)
     t0 = time.time()
-    run = Runner(args.mode, args.ckpt, args.model, flags=tuple(x for x in args.flags.split(",") if x),
+    run = Runner(args.mode, args.ckpt, args.model, teacher=args.teacher, flags=tuple(x for x in args.flags.split(",") if x),
                  prompt_alpha=args.prompt_alpha, hyb_bound=args.hyb_bound)
     print(f"loaded mode={args.mode} arch={run.arch} in {time.time() - t0:.0f}s", flush=True)
     res, pf = {}, open(f"{args.out_dir}/{args.name}.preds.jsonl", "w")
@@ -198,7 +217,7 @@ def main():
         except Exception:
             pass
     eval_manifest = build_run_manifest("eval_benchmarks", vars(args),
-                                       extra={"ckpt_sha256": ckpt_sha256, "ckpt_manifest": ckpt_manifest})
+                                       extra={"evaluated_ckpt_sha256": ckpt_sha256, "ckpt_manifest": ckpt_manifest})
     out = {"name": args.name, "mode": args.mode, "ckpt": args.ckpt, "ckpt_sha256": ckpt_sha256,
            "model": args.model, "arch": run.arch,
            "scorer_version": bs.SCORER_VERSION, "manifest": eval_manifest,

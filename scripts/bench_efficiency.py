@@ -1,351 +1,207 @@
-"""效率与显存基准测试（独立生命周期隔离版）：
-针对五种实际模型架构，在每个分辨率 N in {256, 576, 1024, 2304, 4096} 下，各自独占 GPU 测量：
-  1. ours       : SpinVL-Free 最终架构 (PatchFront rots K=4 + LayerVRMG[mf, hyb, qcond, direct_hyb])
-  2. tower_ours : SpinVL-Tower 最终架构 (External 0.41B ViT + LayerVRMG[mf, hyb, qcond, direct_hyb])
-  3. rose       : ROSE 单频旋转基线 (External 0.41B ViT + LayerVRMG[single-freq, no hyb, no qcond])
-  4. keep       : 保留视觉 Token 的内置编码器对照 (N/4 cells + Q tokens 跑满 L 层)
-  5. llava      : LLaVA-Proj 全量视觉 Token 基线 (External 0.41B ViT + Projector + N/4 cells + Q tokens 跑满 L 层)
+"""Isolated inference timing with actual checkpoints and explicit FLOP estimates.
 
-每个模型独立构建、独立统计显存峰值 (peak_gib)，并在同一趟运行内用 use_cache=True 连续打点测量：
-  - prefill_ms : 视觉特征提取 + 文本 Prompt 首步前向（产出第 1 个新 token 与 KV cache）
-  - decode_ms  : 基于 KV cache 连续贪婪解码剩余 (gen_tokens - 1) 个 token 的耗时
-  - total_ms   : prefill_ms + decode_ms 端到端总耗时
+Each mode runs in a fresh subprocess/CUDA context. Use --synthetic explicitly
+for random adapters; missing supplied checkpoints always fail. 'keep' is a
+token-retention compute reference, not a trained VoRA reproduction.
 """
-
 import argparse
-import gc
+from contextlib import ExitStack
 import json
+import math
 import os
-import statistics
-import sys
-import time
-import traceback
 from pathlib import Path
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from front import PatchFront, unwrap_layer  # noqa: E402
-from provenance import build_run_manifest  # noqa: E402
-from wrap import attach_rotation, rotation_context_with  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT/"src"), str(ROOT/"scripts")]
+from front import PatchFront
+from flops import PrefillFlopEstimate
+from provenance import build_run_manifest, capture_run_inputs
+from wrap import attach_rotation, rotation_context_with
 
 B = "/data/ibu-bi-ai-share-disk"
 Q = 64
+MODES = ("ours", "tower_ours", "rose", "keep", "llava")
+CKPT_FOR = {"ours": "joint_ckpt", "tower_ours": "tower_ckpt", "rose": "rose_ckpt", "llava": "proj_ckpt"}
 
 
 def grid_for(n):
-    s = int(round(n ** 0.5))
-    return torch.tensor([[1, s, s]]), s * s
+    s = math.isqrt(n)
+    if s*s != n or s%2:
+        raise ValueError("Patch count must be an exact square with an even side length")
+    return torch.tensor([[1,s,s]]), n
 
 
-def transformer_flops(d, ff, nl, L, q_dim, kv_dim, causal=True):
-    """解析式前向 FLOPs（TFLOPs）：线性层乘加算 2，注意力分数与加权各一次，causal 取一半。"""
-    lin = 2 * L * (d * q_dim + 2 * d * kv_dim + q_dim * d + 3 * d * ff)
-    attn = 2 * 2 * (L * L / 2 if causal else L * L) * q_dim
-    return nl * (lin + attn) / 1e12
+def validate_args(args):
+    modes = args.modes.split(",")
+    if not modes or len(set(modes)) != len(modes) or any(m not in MODES for m in modes):
+        raise ValueError(f"Invalid modes: {args.modes}")
+    for key in (*CKPT_FOR.values(), "front_ckpt"):
+        value = getattr(args, key, "")
+        if value and not Path(value).is_file():
+            raise FileNotFoundError(f"--{key.replace('_','-')}: {value}")
+    if args.front_ckpt:
+        raise ValueError("Use a complete --joint-ckpt; partial front-only timing is unsupported")
+    for mode in modes:
+        if mode in CKPT_FOR and not args.synthetic and not getattr(args, CKPT_FOR[mode]):
+            raise ValueError(f"{mode} requires --{CKPT_FOR[mode].replace('_','-')} (or explicit --synthetic)")
+    if args.synthetic and any(getattr(args,k) for k in CKPT_FOR.values()):
+        raise ValueError("Do not mix synthetic adapters with trained checkpoint arguments")
+    if args.gen_tokens<1 or args.warm<0 or args.runs<1:
+        raise ValueError("Invalid generation/timing counts")
+    for n in args.Ns.split(","):
+        grid_for(int(n))
+    return modes
 
 
-def compute_analytic_tflops(model_cfg, vcfg, K, n_patch, seq_len, n_vrmg_layers=7):
-    cells = n_patch // 4
-    d, ff = model_cfg.hidden_size, model_cfg.intermediate_size
-    q_dim = model_cfg.num_attention_heads * getattr(model_cfg, "head_dim", d // model_cfg.num_attention_heads)
-    kv_dim = model_cfg.num_key_value_heads * getattr(model_cfg, "head_dim", d // model_cfg.num_attention_heads)
-    vh, vff = vcfg.hidden_size, vcfg.intermediate_size
-    vq = vh
-    v_depth = getattr(vcfg, "depth", getattr(vcfg, "num_hidden_layers", 32))
-    v_out = getattr(vcfg, "out_hidden_size", 4096)
-
-    # 1. 外部视觉塔 FLOPs
-    tower_pe = 2 * n_patch * 1536 * vh
-    tower_body = transformer_flops(vh, vff, v_depth, n_patch, vq, vq, causal=False) * 1e12
-    tower_mg = 2 * cells * (4 * vh) * v_out * 2
-    tower_tf = (tower_pe + tower_body + tower_mg) / 1e12
-
-    # 2. 内置前端 PatchFront (rots K=4) FLOPs
-    front_pe = 2 * n_patch * 1536 * d
-    front_rot = K * 2 * n_patch * (4 * d + 2 * kv_dim + 3 * ff) * 64 + K * n_patch * (4 * d + 2 * kv_dim + 3 * ff)
-    front_body = transformer_flops(d, ff, K, n_patch, q_dim, kv_dim, causal=False) * 1e12
-    front_mg = 2 * cells * (4 * d) * v_out * 2
-    front_tf = (front_pe + front_rot + front_body + front_mg) / 1e12
-
-    # 3. VRMG 算力：区分单频 ROSE 与完整 SpinVL (mf + qcond + direct_hyb)
-    total_blocks = (4 * d + 2 * kv_dim + 3 * ff) // 64
-    qdim_v = 256
-    kv_proj = 2 * 2 * cells * v_out * qdim_v
-    q_attn = 2 * 2 * total_blocks * cells * qdim_v
-    out_lin = 2 * total_blocks * qdim_v * (64 * 63 // 2)
-    cayley = total_blocks * (2 * (64 ** 3))
-    apply_rot = 2 * seq_len * (4 * d + 2 * kv_dim + 3 * ff) * 64
-    vrmg_single_tf = n_vrmg_layers * (kv_proj + q_attn + out_lin + cayley + apply_rot) / 1e12
-
-    qcond_ops = 2 * d * qdim_v + seq_len * d
-    gate_ops = 2 * seq_len * d * total_blocks
-    hyb_ops = 2 * 2 * cells * v_out * qdim_v + 2 * seq_len * d * qdim_v * 2 + 2 * 2 * seq_len * cells * qdim_v
-    vrmg_full_tf = vrmg_single_tf + n_vrmg_layers * (qcond_ops + gate_ops + hyb_ops) / 1e12
-
-    llm_q_tf = transformer_flops(d, ff, model_cfg.num_hidden_layers, seq_len, q_dim, kv_dim)
-    llm_full_tf = transformer_flops(d, ff, model_cfg.num_hidden_layers, cells + seq_len, q_dim, kv_dim)
-    proj_tf = (2 * cells * v_out * d * 2) / 1e12
-
-    return {
-        "ours": front_tf + llm_q_tf + vrmg_full_tf,
-        "tower_ours": tower_tf + llm_q_tf + vrmg_full_tf,
-        "rose": tower_tf + llm_q_tf + vrmg_single_tf,
-        "keep": llm_full_tf,
-        "llava": tower_tf + proj_tf + llm_full_tf,
-    }
-
-
-def unwrap_all_layers(model):
-    for i in range(len(model.model.layers)):
-        model.model.layers[i] = unwrap_layer(model.model.layers[i])
-
-
-def run_prefill_and_decode(prefill_fn, step_fn, gen_tokens: int, warm: int = 2, runs: int = 8):
-    """在同一趟内连续测量 prefill_ms 与 decode_ms (gen_tokens - 1 步)，保证 prefill_ms + decode_ms == total_ms。"""
+def run_prefill_and_decode(prefill_fn, step_fn, gen_tokens, warm=2, runs=8):
     def one_trial():
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        next_tok, past_kv, ctx_Exit = prefill_fn()
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        try:
-            cur_tok = next_tok
-            for _ in range(max(0, gen_tokens - 1)):
-                cur_tok, past_kv = step_fn(cur_tok, past_kv)
-        finally:
-            if ctx_Exit is not None:
-                ctx_Exit.__exit__(None, None, None)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        return (t1 - t0) * 1000.0, (t2 - t1) * 1000.0, (t2 - t0) * 1000.0
-
+        with ExitStack() as stack:
+            torch.cuda.synchronize(); t0=time.perf_counter()
+            token, cache = prefill_fn(stack)
+            torch.cuda.synchronize(); t1=time.perf_counter()
+            for _ in range(gen_tokens-1):
+                token, cache = step_fn(token,cache)
+            torch.cuda.synchronize(); t2=time.perf_counter()
+        return {"prefill_ms":(t1-t0)*1000, "decode_ms":(t2-t1)*1000, "total_ms":(t2-t0)*1000}
     for _ in range(warm):
         one_trial()
-    torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats()
-    pf_list, dc_list, tot_list = [], [], []
-    for _ in range(runs):
-        pf, dc, tot = one_trial()
-        pf_list.append(pf)
-        dc_list.append(dc)
-        tot_list.append(tot)
-    peak_gib = torch.cuda.max_memory_allocated() / 1024 ** 3
-    return {
-        "ms": statistics.median(pf_list),
-        "prefill_ms": statistics.median(pf_list),
-        "prefill_mean_ms": statistics.mean(pf_list),
-        "prefill_std_ms": statistics.stdev(pf_list) if len(pf_list) > 1 else 0.0,
-        "decode_ms": statistics.median(dc_list),
-        "decode_mean_ms": statistics.mean(dc_list),
-        "decode_std_ms": statistics.stdev(dc_list) if len(dc_list) > 1 else 0.0,
-        "total_ms": statistics.median(tot_list),
-        "total_mean_ms": statistics.mean(tot_list),
-        "total_std_ms": statistics.stdev(tot_list) if len(tot_list) > 1 else 0.0,
-        "peak_gib": peak_gib,
-    }
+    baseline=torch.cuda.memory_allocated()/1024**3
+    trials=[one_trial() for _ in range(runs)]
+    result={"trials":trials, "resident_gib":baseline,
+            "peak_gib":torch.cuda.max_memory_allocated()/1024**3,
+            "timing_definition":"prefill includes token 1; decode generates tokens 2..N; paired per-trial times"}
+    for key in ("prefill_ms","decode_ms","total_ms"):
+        values=[t[key] for t in trials]
+        result[key]=statistics.median(values)
+        result[key.replace("_ms","_mean_ms")]=statistics.mean(values)
+        result[key.replace("_ms","_std_ms")]=statistics.stdev(values) if runs>1 else 0.0
+    result["ms"]=result["prefill_ms"]
+    # Separate medians need not add; raw paired trials and means do.
+    return result
+
+
+def _build(args, mode):
+    from bench_models import Runner
+    if mode != "keep" and not args.synthetic:
+        api_mode={"ours":"tower_free","tower_ours":"tower","rose":"tower","llava":"proj"}[mode]
+        runner=Runner(api_mode,getattr(args,CKPT_FOR[mode]),args.model,teacher=args.teacher)
+        if runner.arch.get("tuned_backbone"):
+            raise ValueError("Efficiency comparison requires an unmodified frozen original LLM")
+        if mode=="rose" and any(runner.arch.get(k) for k in ("multifreq","hybrid","qcond","direct_hyb","no_rot")):
+            raise ValueError("ROSE checkpoint is not the single-frequency, rotation-only baseline")
+        if mode in ("ours","tower_ours") and (not all(runner.arch.get(k) for k in ("multifreq","hybrid","qcond","direct_hyb")) or runner.arch.get("no_rot")):
+            raise ValueError("Checkpoint does not implement the requested full SpinVL architecture")
+        if mode=="ours" and (runner.arch["K"]!=args.K or runner.arch["front_mode"]!="rots"):
+            raise ValueError("Joint checkpoint frontend differs from --K/rots")
+        return runner.model,runner.registry,runner.front,runner.vision,runner.proj,runner.arch
+    model=AutoModelForCausalLM.from_pretrained(args.model,dtype=torch.bfloat16,device_map="cuda").eval()
+    registry={};front=tower=proj=None
+    if mode in ("ours","tower_ours","rose"):
+        layers=[0,4,8,12,16,20,24]
+        full=mode!="rose"
+        modules,registry=attach_rotation(model,layers,block_size=64,visual_dim=4096,query_dim=256,
+            wrap_extra=[i for i in range(args.K) if i not in layers] if mode=="ours" else [],
+            multifreq=full,hybrid=full,qcond=full,direct_hyb=full)
+        for m in modules:m.eval()
+        if mode=="ours":front=PatchFront(model,K=args.K,mode="rots",vdim=4096).cuda().eval()
+    if mode in ("tower_ours","rose","llava"):
+        from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel
+        cfg=AutoConfig.from_pretrained(args.teacher).vision_config
+        tower=Qwen3VLVisionModel(cfg).cuda().to(torch.bfloat16).eval()
+    if mode=="llava":
+        from train_proj import Proj
+        proj=Proj(4096,model.config.hidden_size).cuda().float().eval()
+    return model,registry,front,tower,proj,{"synthetic_adapters":args.synthetic,"reference_only":mode=="keep"}
+
+
+def run_worker(args,mode):
+    if not torch.cuda.is_available():raise RuntimeError("CUDA required for latency measurement")
+    capture_run_inputs(vars(args))
+    torch.manual_seed(args.seed)
+    model,registry,front,tower,proj,arch=_build(args,mode)
+    for p in model.parameters():p.requires_grad_(False)
+    txt=torch.randint(100,1000,(1,Q),device="cuda"); mask=torch.ones_like(txt)
+    roots={"llm":model,"front":front,"vision":tower,"projector":proj}
+    roots.update({f"vrmg_{k}":v for k,v in registry.items()})
+    rows=[]
+    with torch.inference_mode():
+        for count in args.Ns.split(","):
+            grid,n=grid_for(int(count)); cells=n//4
+            patches=torch.randn(1,n,1536,device="cuda",dtype=torch.float16)
+            retained=torch.randn(1,cells,model.config.hidden_size,device="cuda",dtype=model.dtype) if mode=="keep" else None
+            def prefill(stack):
+                if mode=="ours":
+                    features,lens=front(patches,grid,[n]); vf=features[:,:lens[0]].float()
+                elif tower is not None:
+                    out=tower(patches[0].to(torch.bfloat16),grid_thw=grid.to("cuda"))
+                    vf=getattr(out,"pooler_output",None)
+                    if vf is None:vf=out[0] if isinstance(out,(tuple,list)) else out
+                    vf=vf.float().unsqueeze(0)
+                if registry:
+                    visual_mask=torch.ones(1,vf.shape[1],device="cuda")
+                    stack.enter_context(rotation_context_with(registry,vf,visual_mask,text_mask=mask))
+                    out=model(input_ids=txt,attention_mask=mask,use_cache=True)
+                else:
+                    v=retained if mode=="keep" else proj(vf[0]).to(model.dtype).unsqueeze(0)
+                    embeddings=torch.cat([v,model.get_input_embeddings()(txt)],dim=1)
+                    out=model(inputs_embeds=embeddings,use_cache=True)
+                return out.logits[:,-1:,:].argmax(-1),out.past_key_values
+            def step(token,cache):
+                out=model(input_ids=token,past_key_values=cache,use_cache=True)
+                return out.logits[:,-1:,:].argmax(-1),out.past_key_values
+            # Shape profiling is untimed and uses the same prefill implementation.
+            with PrefillFlopEstimate(roots) as estimator,ExitStack() as stack:
+                token,cache=prefill(stack)
+                del token,cache
+            estimate=estimator.result()
+            stats=run_prefill_and_decode(prefill,step,args.gen_tokens,args.warm,args.runs)
+            rows.append({"N_patches":n,"cells":cells,"gen_tokens":args.gen_tokens,**estimate,**stats})
+    result={"mode":mode,"pid":os.getpid(),"arch":arch,"rows":rows,
+        "comparison_role":"token_retention_compute_reference" if mode=="keep" else "synthetic_architecture" if args.synthetic else "trained_checkpoint",
+        "input_kind":"random_preprocessed_patches; fixed 64-token text prefix",
+        "manifest":build_run_manifest("efficiency_worker",vars(args))}
+    Path(args.worker_out).write_text(json.dumps(result,indent=2),encoding="utf-8")
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--K", type=int, default=4)
-    ap.add_argument("--Ns", default="256,576,1024,2304,4096")
-    ap.add_argument("--gen-tokens", type=int, default=24)
-    ap.add_argument("--joint-ckpt", default="", help="可选：SpinVL-Free 联合训练/OPD 权重 (.pt)")
-    ap.add_argument("--tower-ckpt", default="", help="可选：SpinVL-Tower 权重 (.pt)")
-    ap.add_argument("--rose-ckpt", default="", help="可选：ROSE 权重 (.pt)")
-    ap.add_argument("--front-ckpt", default="", help="向后兼容：仅加载前端权重")
-    ap.add_argument("--out", required=True)
-    args = ap.parse_args()
-    dev = "cuda"
-
-    from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel
-    vcfg = AutoConfig.from_pretrained(f"{B}/zk/model/Qwen3-VL-8B-Instruct", trust_remote_code=True).vision_config
-    model_path = f"{B}/zk/model/Qwen3-1.7B"
-    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16, device_map=dev,
-                                                 trust_remote_code=True).eval()
-    for p in model.parameters():
-        p.requires_grad_(False)
-    layers = [0, 4, 8, 12, 16, 20, 24]
-    Ns = [int(x) for x in args.Ns.split(",")]
-    rows_by_n = {}
-    for N in Ns:
-        _, n_patch = grid_for(N)
-        tf_est = compute_analytic_tflops(model.config, vcfg, args.K, n_patch, Q, len(layers))
-        rows_by_n[n_patch] = {
-            "N_patches": n_patch,
-            "cells": n_patch // 4,
-            "gen_tokens": args.gen_tokens,
-            "_tf_est": tf_est,
-        }
-
-    txt = torch.randint(100, 1000, (1, Q), device=dev)
-    attn_txt = torch.ones_like(txt)
-
-    # 逐模型独立构建、测试与释放，避免不同架构共用 registry 或污染显存峰值
-    for mode_name in ("ours", "tower_ours", "rose", "keep", "llava"):
-        unwrap_all_layers(model)
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-
-        vrmgs, registry, front, tower, proj = [], {}, None, None, None
-        if mode_name == "ours":
-            vrmgs, registry = attach_rotation(
-                model, layers, block_size=64, visual_dim=4096, query_dim=256,
-                wrap_extra=[l for l in range(args.K) if l not in layers],
-                multifreq=True, hybrid=True, qcond=True, direct_hyb=True
-            )
-            front = PatchFront(model, K=args.K, mode="rots", vdim=4096).to(dev).eval()
-            if args.joint_ckpt and os.path.exists(args.joint_ckpt):
-                jck = torch.load(args.joint_ckpt, map_location=dev)
-                front.load_state_dict(jck["front"])
-                for m, sd in zip(vrmgs, jck["vrmg"]):
-                    m.load_state_dict(sd)
-            elif args.front_ckpt and os.path.exists(args.front_ckpt):
-                front.load_state_dict(torch.load(args.front_ckpt, map_location=dev)["front"])
-            for m in vrmgs:
-                m.eval()
-        elif mode_name == "tower_ours":
-            vrmgs, registry = attach_rotation(
-                model, layers, block_size=64, visual_dim=4096, query_dim=256,
-                multifreq=True, hybrid=True, qcond=True, direct_hyb=True
-            )
-            if args.tower_ckpt and os.path.exists(args.tower_ckpt):
-                tck = torch.load(args.tower_ckpt, map_location=dev)
-                for m, sd in zip(vrmgs, tck["state"]):
-                    m.load_state_dict(sd)
-            for m in vrmgs:
-                m.eval()
-            tower = Qwen3VLVisionModel(vcfg).to(dev, dtype=torch.bfloat16).eval()
-        elif mode_name == "rose":
-            # 严格使用单频、无 hybrid、无 qcond 的 ROSE 基线结构
-            vrmgs, registry = attach_rotation(
-                model, layers, block_size=64, visual_dim=4096, query_dim=256,
-                multifreq=False, hybrid=False, qcond=False, direct_hyb=False
-            )
-            if args.rose_ckpt and os.path.exists(args.rose_ckpt):
-                rck = torch.load(args.rose_ckpt, map_location=dev)
-                for m, sd in zip(vrmgs, rck["state"]):
-                    m.load_state_dict(sd)
-            for m in vrmgs:
-                m.eval()
-            tower = Qwen3VLVisionModel(vcfg).to(dev, dtype=torch.bfloat16).eval()
-        elif mode_name == "llava":
-            tower = Qwen3VLVisionModel(vcfg).to(dev, dtype=torch.bfloat16).eval()
-            proj = torch.nn.Sequential(
-                torch.nn.Linear(4096, model.config.hidden_size),
-                torch.nn.GELU(),
-                torch.nn.Linear(model.config.hidden_size, model.config.hidden_size),
-            ).to(dev, dtype=torch.bfloat16).eval()
-
-        emb = model.get_input_embeddings()
-        with torch.no_grad():
-            for N in Ns:
-                grid, n_patch = grid_for(N)
-                cells = n_patch // 4
-                pv = torch.randn(1, n_patch, 1536, device=dev, dtype=torch.float16)
-                tower_in = torch.randn(n_patch, 1536, device=dev, dtype=torch.bfloat16)
-                vis_tok = torch.randn(1, cells, model.config.hidden_size, device=dev, dtype=torch.bfloat16)
-                vm = torch.ones(1, cells, device=dev)
-
-                def make_fns(m_name):
-                    if m_name == "ours":
-                        def pf():
-                            vh, cl = front(pv, grid, [n_patch])
-                            ctx = rotation_context_with(registry, vh, vm[:, : cl[0]], text_mask=attn_txt)
-                            ctx.__enter__()
-                            o = model(input_ids=txt, attention_mask=attn_txt, use_cache=True)
-                            nt = o.logits[:, -1:, :].argmax(dim=-1)
-                            return nt, o.past_key_values, ctx
-
-                        def st(cur_tok, pkv):
-                            o = model(input_ids=cur_tok, past_key_values=pkv, use_cache=True)
-                            return o.logits[:, -1:, :].argmax(dim=-1), o.past_key_values
-                        return pf, st
-
-                    if m_name in ("tower_ours", "rose"):
-                        def pf():
-                            vo = tower(tower_in, grid_thw=grid)
-                            vf = (vo[0] if isinstance(vo, (tuple, list)) else vo).float().unsqueeze(0)
-                            ctx = rotation_context_with(registry, vf, vm, text_mask=attn_txt)
-                            ctx.__enter__()
-                            o = model(input_ids=txt, attention_mask=attn_txt, use_cache=True)
-                            nt = o.logits[:, -1:, :].argmax(dim=-1)
-                            return nt, o.past_key_values, ctx
-
-                        def st(cur_tok, pkv):
-                            o = model(input_ids=cur_tok, past_key_values=pkv, use_cache=True)
-                            return o.logits[:, -1:, :].argmax(dim=-1), o.past_key_values
-                        return pf, st
-
-                    if m_name == "keep":
-                        def pf():
-                            e = torch.cat([vis_tok, emb(txt)], dim=1)
-                            o = model(inputs_embeds=e, use_cache=True)
-                            nt = o.logits[:, -1:, :].argmax(dim=-1)
-                            return nt, o.past_key_values, None
-
-                        def st(cur_tok, pkv):
-                            o = model(input_ids=cur_tok, past_key_values=pkv, use_cache=True)
-                            return o.logits[:, -1:, :].argmax(dim=-1), o.past_key_values
-                        return pf, st
-
-                    def pf():
-                        vo = tower(tower_in, grid_thw=grid)
-                        vf = (vo[0] if isinstance(vo, (tuple, list)) else vo).to(torch.bfloat16).unsqueeze(0)
-                        vt = proj(vf)
-                        e = torch.cat([vt, emb(txt)], dim=1)
-                        o = model(inputs_embeds=e, use_cache=True)
-                        nt = o.logits[:, -1:, :].argmax(dim=-1)
-                        return nt, o.past_key_values, None
-
-                    def st(cur_tok, pkv):
-                        o = model(input_ids=cur_tok, past_key_values=pkv, use_cache=True)
-                        return o.logits[:, -1:, :].argmax(dim=-1), o.past_key_values
-                    return pf, st
-
-                pf_fn, st_fn = make_fns(mode_name)
-                try:
-                    stats = run_prefill_and_decode(pf_fn, st_fn, args.gen_tokens)
-                    tflops_val = rows_by_n[n_patch]["_tf_est"][mode_name]
-                    rows_by_n[n_patch][mode_name] = {
-                        "tflops": tflops_val,
-                        "est_prefill_tflops": tflops_val,
-                        **stats,
-                    }
-                except Exception as e:
-                    tb = traceback.extract_tb(e.__traceback__)[-1]
-                    rows_by_n[n_patch][mode_name] = {
-                        "error": f"{type(e).__name__}: {str(e)[:160]} @ {os.path.basename(tb.filename)}:{tb.lineno}"
-                    }
-
-        del vrmgs, registry, front, tower, proj
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    rows = []
-    for N in Ns:
-        _, n_patch = grid_for(N)
-        r = rows_by_n[n_patch]
-        r.pop("_tf_est", None)
-        r["peak_gib"] = r.get("ours", {}).get("peak_gib", 0.0)
-        print(json.dumps(r), flush=True)
-        rows.append(r)
-
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    manifest = build_run_manifest("efficiency", vars(args))
-    json.dump({
-        "K": args.K,
-        "Q": Q,
-        "gen_tokens": args.gen_tokens,
-        "manifest": manifest,
-        "rows": rows,
-        "note": "各模型独立生命周期独占 GPU 测量；rose 为单频无 cross-attention 基线，ours/tower_ours 为完整架构；prefill_ms 与 decode_ms 为同趟连续打点",
-    }, open(args.out, "w"), indent=1, ensure_ascii=False)
-    print("BENCH_DONE")
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--model",default=f"{B}/zk/model/Qwen3-1.7B")
+    ap.add_argument("--teacher",default=f"{B}/zk/model/Qwen3-VL-8B-Instruct")
+    ap.add_argument("--K",type=int,default=4);ap.add_argument("--Ns",default="256,576,1024,2304,4096")
+    ap.add_argument("--gen-tokens",type=int,default=24);ap.add_argument("--modes",default=",".join(MODES))
+    for key in (*CKPT_FOR.values(),"front_ckpt"):ap.add_argument("--"+key.replace("_","-"),default="")
+    ap.add_argument("--synthetic",action="store_true");ap.add_argument("--warm",type=int,default=2)
+    ap.add_argument("--runs",type=int,default=8);ap.add_argument("--seed",type=int,default=0)
+    ap.add_argument("--worker-mode",choices=MODES,default="",help=argparse.SUPPRESS)
+    ap.add_argument("--worker-out",default="",help=argparse.SUPPRESS)
+    ap.add_argument("--out",required=True)
+    args=ap.parse_args(); modes=validate_args(args)
+    if args.worker_mode:
+        run_worker(args,args.worker_mode);return
+    results={}
+    with tempfile.TemporaryDirectory(prefix="spinvl_eff_") as temp:
+        for mode in modes:
+            output=str(Path(temp)/(mode+".json"))
+            subprocess.run([sys.executable,"-B",str(Path(__file__).resolve()),*sys.argv[1:],
+                            "--worker-mode",mode,"--worker-out",output],check=True)
+            results[mode]=json.loads(Path(output).read_text(encoding="utf-8"))
+    rows=[]
+    for i,count in enumerate(args.Ns.split(",")):
+        n=int(count)
+        rows.append({"N_patches":n,"cells":n//4,**{m:results[m]["rows"][i] for m in modes}})
+    out=Path(args.out);out.parent.mkdir(parents=True,exist_ok=True)
+    out.write_text(json.dumps({"schema_version":3,"Q":Q,"K":args.K,"rows":rows,
+        "modes":results,"note":"Fresh subprocess per mode; algorithmic FLOP estimate, not measured hardware FLOPs. Paired trials retained; separate medians need not add."},indent=2),encoding="utf-8")
+    print("BENCH_DONE",out)
 
 
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":main()
