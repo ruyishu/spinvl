@@ -1,0 +1,84 @@
+scripts/bench_models.py
+  s_2218750ca2fee0::t_da9d1a372bf2df 161-169
+  s_2218750ca2fee0::t_d239654ab7c215 67-69,82-83
+  s_2218750ca2fee0::t_4574f42af367ac 1-2
+src/wrap.py
+  s_2218750ca2fee0::t_5e221e73850a2a 35-36
+  s_2218750ca2fee0::t_f9fc7558f95196 93-94,105-106
+scripts/train_front.py
+  s_2218750ca2fee0::t_2a9385c1fafdef 114-117,119
+  s_2218750ca2fee0::t_81cb868e60d38d 167-168,170-174
+  s_2218750ca2fee0::t_7a5a30ab6bc26c 23
+  s_2218750ca2fee0::t_4ed4b31584b011 72-89
+scripts/train_opd.py
+  s_2218750ca2fee0::t_af20bb8cf7385c 260-261
+  s_2218750ca2fee0::t_6084fa719c009a 197
+paper/sections/3_method.tex
+  s_2218750ca2fee0::t_8a0502117ba865 65-72
+  s_2218750ca2fee0::t_1428c0e35d6adf 28-33,35,44-48
+  s_2218750ca2fee0::t_4567ff959340c8 92-97
+  s_2218750ca2fee0::t_fadc232e64dc28 143-145,153-166
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_4fa45352feb2e4 136
+  s_2218750ca2fee0::t_3cabef7c2a62df 498
+  s_2218750ca2fee0::t_ddfe8cdbf9765e 307
+  s_2218750ca2fee0::t_7f791842c6af0d 113
+scripts/verify_paper_numbers.py
+  s_2218750ca2fee0::t_55f822b891ce5f 44,54-56
+  s_2218750ca2fee0::t_b5cfc5a5ad0c1f 1,5,8,29-43,45-53,57-66,70,72-101,103-107,110-119,121-122,125-132,135-141,143-144,147-152,155-162,164,167-170,173-198,200-202,205,209-219,222
+scripts/eval_benchmarks.py
+  s_2218750ca2fee0::t_c988d2313d6965 108,135,137-143,151-152
+  s_2218750ca2fee0::t_229a5776627417 188,191
+  s_2218750ca2fee0::t_2e7081a8900dfe 41-43,53-58,60-61,72-73,82,95
+scripts/train_final.py
+  s_2218750ca2fee0::t_c78233690affad 392
+  s_2218750ca2fee0::t_93126ed53b990e 541-542,546,548,550-555
+  s_2218750ca2fee0::t_c84168ec8d234b 237,241-243,245-246,250,253,255,266-269
+  s_2218750ca2fee0::t_c55b41f074bb79 34-150,158-159,174,177-178
+  s_2218750ca2fee0::t_8ea281b8ac392f 433
+  s_2218750ca2fee0::t_8cb9abf2585802 407
+  s_2218750ca2fee0::t_017f2369abd67f 484-505
+scripts/bench_score.py
+  s_2218750ca2fee0::t_4a4140ef1445ca 6-7
+  s_2218750ca2fee0::t_51d86dbc2fd2a5 106-117,119-122,138
+  s_2218750ca2fee0::t_7aec4b7754142c 226-228
+scripts/train_joint_opd.py
+  s_2218750ca2fee0::t_8a0c9ae63e0148 101-102,106-109,118,125
+  s_2218750ca2fee0::t_89deb9e93781a7 181
+  s_2218750ca2fee0::t_15519732b64763 39-40,42-79,81-82,85-87
+  s_2218750ca2fee0::t_973355afc90cb3 201-215,217,223-227,232,249-279,283-317,330,341-342,346,348-352,354
+src/vrmg.py
+  s_2218750ca2fee0::t_6eff0421d25280 22,27-28,32,34,50-57,65,73
+  s_2218750ca2fee0::t_d7c02d01962565 108
+  s_2218750ca2fee0::t_0043e93bf4409f 133-136,138-158,160-178,180-189
+  s_2218750ca2fee0::t_dc10df59f349d8 297-317
+scripts/train_joint.py
+  s_2218750ca2fee0::t_0c1444ce3877c2 53
+  s_2218750ca2fee0::t_69949c5aed074c 68-69,71-76,78-80,84,86-99,103,107,111,115,122-123
+  s_2218750ca2fee0::t_ec1209361d052a 199-200,209-216
+  s_2218750ca2fee0::t_cf91691074a565 141
+  s_2218750ca2fee0::t_b67c51095d90fc 263-282
+  s_2218750ca2fee0::t_0972170ec93495 307,315
+scripts/bench_efficiency.py
+  s_2218750ca2fee0::t_233dd8f4e49434 37,41,45-55
+  s_2218750ca2fee0::t_f9982f18a50b68 75,84-86
+  s_2218750ca2fee0::t_c3f4af09360c70 107-108,111-119,123-131,142-151,167-168,171-188,191-192,196,199-214,218,223-226
+scripts/verify_foundation_gate.py
+  s_2218750ca2fee0::t_4b5e649aaf8b5f 1-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "7418e7981c6cd00ee59ff658e5c26998b4f1e10b",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
