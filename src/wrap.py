@@ -32,6 +32,8 @@ def rotation_context_with(registry, visual, visual_mask=None, ans_start=None, te
         yield
     finally:
         _CTX = prev
+        if prev is None:
+            _STORAGE_CTX.clear()
 
 
 class RotatedProj(nn.Module):
@@ -88,7 +90,8 @@ def _in_features(m):
 def attach_rotation(model: nn.Module, layer_indices, block_size: int = 64, visual_dim: int = 2560,
                     query_dim: int = 256, num_heads: int = 8, wrap_extra=(), multifreq: bool = False,
                     tokrot: bool = False, hybrid: bool = False, prompt_alpha: float = 1.0,
-                    hyb_bound: float = 0.0, qcond: bool = False, direct_hyb: bool = False):
+                    hyb_bound: float = 0.0, qcond: bool = False, direct_hyb: bool = False,
+                    no_rot: bool = False):
     layers = model.model.layers
     modules, registry = [], {}
     for li in layer_indices:
@@ -99,7 +102,8 @@ def attach_rotation(model: nn.Module, layer_indices, block_size: int = 64, visua
         vrmg = LayerVRMG(proj_dims, block_size=block_size, visual_dim=visual_dim,
                          query_dim=query_dim, num_heads=num_heads, multifreq=multifreq,
                          tokrot=tokrot, hybrid=hybrid, prompt_alpha=prompt_alpha,
-                         hyb_bound=hyb_bound, qcond=qcond, direct_hyb=direct_hyb).to(dev, dtype=torch.float32)
+                         hyb_bound=hyb_bound, qcond=qcond, direct_hyb=direct_hyb,
+                         no_rot=no_rot).to(dev, dtype=torch.float32)
         registry[li] = vrmg
         modules.append(vrmg)
         _wrap_layer(layer, li, block_size)

@@ -296,10 +296,14 @@ same on-policy distillation stage.
 
 \paragraph{Static rotation with channel scaling.}
 A pure orthogonal rotation preserves norms and angles but cannot change
-singular values, so it can re-aim features without re-weighting channels. We
-therefore compose a rotation with a learned diagonal rescaling,
+singular values, so it can re-aim features without re-weighting channels. For a
+linear projection $y = x W^{\top} + b$, we first rotate each $b$-dimensional
+input block and then apply a learned per-channel diagonal scaling
+$d\in\mathbb{R}^{d_{\text{in}}}$ before multiplying by $W^{\top}$, i.e.\
+$y = ((x R_{\mathrm{s}})\odot d)W^{\top} + b$, which is equivalent to the
+transformed weight
 \begin{equation}
-W' = W\,R_{\mathrm{s}}\,\mathrm{diag}(d),
+W' = W\,\mathrm{diag}(d)\,R_{\mathrm{s}}^{\top},
 \qquad
 R_{\mathrm{s}} = (I-A)^{-1}(I+A),
 \label{eq:static}
@@ -308,8 +312,11 @@ where $A$ is skew-symmetric, $R_{\mathrm{s}}\in SO(b)$ acts on $b{=}64$
 channel blocks, and $d\in\mathbb{R}^{d_{\text{in}}}$ is initialised to ones.
 Because $R_{\mathrm{s}}$ is orthogonal, training stays well conditioned and
 the rescaling supplies the degrees of freedom that orthogonality removes. For
-$K{=}4$ layers and seven projections this amounts to $2.4$M parameters,
-compared with $201$M for copying the layers and $3.7$M for rank-$16$ LoRA.
+$K{=}4$ layers and seven projections on a $1.7$B backbone, the static
+in-layer module has $2.40$M parameters (versus $2.49$M for rank-$16$ LoRA and
+$201$M for duplicating the four layers), while all encoder-free variants share
+the same $3.67$M patch/positional embedding and $50.36$M $2{\times}2$ cell
+merger ($56.42$M vs.\ $56.52$M total frontend parameters).
 
 \paragraph{Reading the image once.}
 Image patches are linearly embedded and given row and column positional
@@ -326,11 +333,14 @@ concatenated and projected by a two-layer merger into one cell feature,
 yielding $\hat{v}\in\mathbb{R}^{N_c\times d_v}$ with $N_c=N/4$.
 
 \paragraph{Discard, then modulate.}
-After Eq.~\eqref{eq:merge} the image tokens are deleted: the remaining
-$L-K$ layers see a purely textual sequence. The only trace of the image is
-$\hat{v}$, which drives the deep rotations of Sec.~\ref{sec:dynamic}. This is
-the structural difference from built-in-encoder approaches that keep the
-patches in the sequence.
+After Eq.~\eqref{eq:merge} the $N$ image patch tokens are deleted: the text
+sequence of length $T$ is then processed through all $L$ layers of the frozen
+LLM without any visual tokens in its self-attention sequence (paying
+$O(K N^2 + L T^2)$ attention instead of $O(L(T+N_c)^2)$). The only trace of the
+image during the text pass is $\hat{v}\in\mathbb{R}^{N_c\times d_v}$, which
+drives the deep modulation of Sec.~\ref{sec:dynamic}. This separates our
+two-phase design from built-in-encoder approaches that keep visual tokens in the
+sequence across all $L$ layers.
 
 \paragraph{Optional feature supervision.}
 When a teacher encoder is available during training we align $\hat{v}$ with
@@ -350,7 +360,12 @@ switched off entirely.
 
 \paragraph{Generating a rotation per layer.}
 For a layer $\ell\in\mathcal{S}$ we keep $N_b$ learnable queries
-$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Visual features are
+$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Optionally, under
+\emph{question conditioning} (\texttt{qcond}), the mean-pooled prompt hidden
+state $\bar x_{\text{prompt}}$ at layer $\ell$ is projected by a
+zero-initialised linear layer $W_{qc}^{(\ell)}\mathrm{LN}(\bar x_{\text{prompt}})$
+and added to $Q_\ell$ so the rotation queries depend on the question as well as
+the image. Visual cell features $V\in\mathbb{R}^{N_c\times d_v}$ are
 projected to keys and values, and the queries read out a context
 \begin{equation}
 C_\ell = \mathrm{MHA}\big(Q_\ell,\; W_k^{(\ell)}V,\; W_v^{(\ell)}V\big),
@@ -396,9 +411,9 @@ so the model starts from the pretrained function and adds rotation only where
 it helps. This variant favours multi-step reasoning over diagrams, where the
 model must repeatedly consult a small region.
 
-\paragraph{Spatial-anchor hybrid (\texttt{hyb}).}
-The second variant keeps the orthogonal rotation and adds a residual that can
-address a few locations,
+\paragraph{Spatial-anchor and direct narrow-subspace hybrid (\texttt{hyb} / \texttt{direct\_hyb}).}
+The second variant keeps the orthogonal rotation and adds a narrow-subspace
+cross-attention residual before the frozen linear projection,
 \begin{equation}
 \Delta x = W_{\mathrm{out}}\,
 \mathrm{MHA}\big(W_q\,\mathrm{LN}(x),\, K_a,\, V_a\big),
@@ -406,14 +421,20 @@ address a few locations,
 y=\big(xR_\ell+\Delta x\big)W^{\top}+b,
 \label{eq:hyb}
 \end{equation}
-where $K_a,V_a$ come from $M{=}16$ learnable anchors pooled from $V$, and
-$W_{\mathrm{out}}$ is zero-initialised. The cross-attention lives in the
-$d_q$-dimensional subspace, so it costs $O(TM d_q)$ instead of
-$O(TN d)$; no visual token enters self-attention. This variant favours
-perception and hallucination tests, where a single global transform is too
-coarse to decide whether a small object is present.
+where $W_{\mathrm{out}}$ is zero-initialised. In the pooled-anchor variant
+(\texttt{hyb}), $K_a,V_a\in\mathbb{R}^{M\times d_q}$ come from $M{=}16$
+learnable spatial anchors pooled from $V$; in the uncompressed direct variant
+(\texttt{direct\_hyb}), $K_a,V_a\in\mathbb{R}^{N_c\times d_q}$ project all $N_c$
+visual cells directly into the $d_q{=}256$ narrow subspace (with a post-attention
+LayerNorm before $W_{\mathrm{out}}$). In both cases the cross-attention operates
+in $d_q{=}256\ll d$ and no visual token enters the LLM's self-attention KV
+cache. To isolate the contribution of orthogonal rotation from this additive
+cross-attention path, we also evaluate a strict \emph{cross-attention-only}
+ablation (\texttt{no\_rot}, $R_\ell\equiv I$, removing the rotation generator
+entirely).
 
-Both variants are single switches; the backbone stays frozen in all cases.
+All variants are controlled by explicit flags while the LLM backbone stays
+strictly frozen.
 
 \subsection{Modality Decoupling}
 \label{sec:decouple}
@@ -584,7 +605,7 @@ Method & Mix & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\upa
 \midrule
 \multicolumn{11}{@{}l}{\textit{Reference (Upper \& Lower Bounds)}} \\
 {\color{gray}Teacher (Qwen3-VL-8B-Instruct, 8B)} & {\color{gray}---} & {\color{gray}0.4B ViT} & {\color{gray}all} & {\color{gray}$2.25\times$} & {\color{gray}65.80} & {\color{gray}72.45} & {\color{gray}63.20} & {\color{gray}69.13} & {\color{gray}67.15} & {\color{gray}59.03} \\
-{\color{gray}Blank-Image Reference (Qwen3-1.7B, Black Image)} & {\color{gray}---} & {\color{gray}---} & {\color{gray}0} & {\color{gray}$0.02\times$} & {\color{gray}23.73} & {\color{gray}48.16} & {\color{gray}19.40} & {\color{gray}35.95} & {\color{gray}30.43} & {\color{gray}15.58} \\
+{\color{gray}\modelname-Tower Blank-Image Control (Black Image)} & {\color{gray}$44$k} & {\color{gray}0.4B ViT} & {\color{gray}0} & {\color{gray}$0.69\times$} & {\color{gray}23.73} & {\color{gray}48.16} & {\color{gray}19.40} & {\color{gray}35.95} & {\color{gray}30.43} & {\color{gray}15.58} \\
 \midrule
 \multicolumn{11}{@{}l}{\textit{With External Vision Tower (0.41B ViT, $21$k Base Mixture, $s{=}0$)}} \\
 LLaVA-Proj~\citep{liu2024improved} (Full Tokens)        & $21$k & 0.4B ViT & all & $1.00\times$ & \underline{29.60} & 53.10 & \textbf{24.90} & \underline{41.35} & \textbf{35.87} & \textbf{21.02} \\
@@ -607,7 +628,7 @@ EVE-style Copy~\citep{diao2024eve} ($K{=}4$, $201$M, \texttt{rel} init) & $21$k 
 Static Cayley Rotation (\texttt{rot} $K{=}4$, $2.3$M, \texttt{rel} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 25.20 & \textbf{56.26} & 20.20 & 40.73 & \textbf{33.89} & \underline{17.55} \\
 VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$ + \texttt{mf}, \texttt{ce} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 15.82 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{mf}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.33} & \underline{55.31} & 18.00 & \textbf{41.32} & 33.55 & 17.33 \\
-\textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 27.20 & 53.21 & \underline{20.30} & 40.21 & 33.57 & 17.37 \\
+\textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 27.20 & 53.21 & \underline{20.30} & 40.20 & 33.57 & 17.37 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $28$k & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & 54.57 & 19.10 & \underline{41.09} & \underline{33.76} & \textbf{17.58} \\
 \midrule
 \multicolumn{11}{@{}l}{\textit{Encoder-Free + On-Policy Distillation (No Vision Tower, $s{=}0$)}} \\
@@ -762,7 +783,7 @@ full copy          & rel & single & 201M  & 1.745 & 1.857 & 43.3/20.0 & 38.82 & 
 \midrule
 LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 30.73 & 15.82 \\
 \textbf{\texttt{rots}} & ce & mf  & \textbf{2.40M} & 1.549 & \textbf{1.783} & 43.3/17.3 & \textbf{41.32} & \textbf{33.55} & \textbf{17.33} \\
-\textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.21 & \textbf{33.57} & \textbf{17.37} \\
+\textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.20 & \textbf{33.57} & \textbf{17.37} \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -773,13 +794,12 @@ first $K{=}4$ layers into a vision encoder on the $21$k base mixture ($s{=}0$),
 with every row's validation and public metrics taken from the exact same
 checkpoint. Within the \texttt{rel}-initialised single-frequency group, pure
 rotation (\texttt{rot}) reaches $40.73\%$ MC2 and $17.55\%$ Avg6 with $2.32$M
-parameters, ahead of copying the layers ($38.82\%$, $201$M) and of dropping the
+in-layer parameters, ahead of copying the layers ($38.82\%$, $201$M) and of dropping the
 layers entirely ($35.92\%$, $K{=}0$). Within the \texttt{ce}-initialised group,
 holding the deep tier fixed at \texttt{mf}, rotation with channel scaling
 (\texttt{rots}) beats rank-$16$ LoRA by $+4.48$ points of MC2 ($41.32\%$ vs.\
 $36.84\%$), $+2.82$ points of Core3 ($33.55\%$ vs.\ $30.73\%$), and a larger
-validation grounding gap ($1.783$ vs.\ $1.667$) while using $36\%$ fewer
-frontend parameters ($2.40$M vs.\ $3.74$M). Even with a single-frequency deep
+validation grounding gap ($1.783$ vs.\ $1.667$). Even with a single-frequency deep
 tier, \texttt{rots} ($38.14\%$ MC2) exceeds LoRA+\texttt{mf} ($36.84\%$).
 
 \paragraph{Depth of the built-in encoder.}
@@ -970,7 +990,7 @@ Model ($44$k Debiased, $s{=}0$) & Val Gap$\uparrow$ & MMStar & Hallu. & MathV. &
  & (nats) & (Real/Shuf) & (Real/Shuf) & (Real/Shuf) & (Real) & (Real) \\
 \midrule
 {\color{gray}Teacher (8B VLM)} & --- & {\color{gray}66.7/29.5} & {\color{gray}72.7/57.1} & {\color{gray}62.5/33.2} & {\color{gray}69.70} & {\color{gray}67.30} \\
-LLaVA-Proj (Full Tok.)         & --- & \textbf{30.1}/29.9 & \textbf{55.4}/54.1 & \textbf{24.4}/24.1 & \textbf{42.77} & \textbf{36.65} \\
+LLaVA-Proj (Full Tok.)         & --- & \textbf{30.1}/29.9 & \textbf{55.4}/54.0 & \textbf{24.4}/24.1 & \textbf{42.77} & \textbf{36.65} \\
 \midrule
 ROSE (Tower, 0 Tok.)           & 0.899 & \textbf{28.7}/28.5 & 46.2/45.7 & 18.7/19.4 & 37.45 & 31.20 \\
 \textbf{\modelname-Tower (Ours)} & \textbf{1.373} & 27.5/28.7 & \textbf{55.3}/52.3 & \textbf{19.0}/19.2 & \textbf{41.42} & \textbf{33.95} \\

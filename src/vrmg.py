@@ -19,18 +19,19 @@ class LayerVRMG(nn.Module):
                  query_dim: int = 256, num_heads: int = 8, identity_init: bool = True,
                  multifreq: bool = False, tokrot: bool = False, hybrid: bool = False,
                  n_anchors: int = 16, prompt_alpha: float = 1.0, hyb_bound: float = 0.0,
-                 qcond: bool = False, direct_hyb: bool = False):
+                 qcond: bool = False, direct_hyb: bool = False, no_rot: bool = False):
         super().__init__()
         self.proj_dims = dict(proj_dims)
         self.block_size = block_size
         self.tri = block_size * (block_size - 1) // 2
-        self.multifreq = multifreq
-        self.tokrot = tokrot
+        self.multifreq = multifreq and not no_rot
+        self.tokrot = tokrot and not no_rot
         self.hybrid = hybrid
         self.prompt_alpha = float(prompt_alpha)
         self.hyb_bound = float(hyb_bound)
-        self.qcond = bool(qcond)
+        self.qcond = bool(qcond) and not no_rot
         self.direct_hyb = bool(direct_hyb)
+        self.no_rot = bool(no_rot)
         self.d_model = proj_dims["q_proj"]
         self.qdim = query_dim
 
@@ -46,11 +47,14 @@ class LayerVRMG(nn.Module):
         self.offsets = offsets
         self.total_blocks = total
 
-        self.queries = nn.Parameter(torch.randn(total, query_dim) * 0.02)
-        self.k_proj = nn.Linear(visual_dim, query_dim)
-        self.v_proj = nn.Linear(visual_dim, query_dim)
-        self.attn = nn.MultiheadAttention(query_dim, num_heads, batch_first=True)
-        self.out = nn.Linear(query_dim, self.tri)
+        if not self.no_rot:
+            self.queries = nn.Parameter(torch.randn(total, query_dim) * 0.02)
+            self.k_proj = nn.Linear(visual_dim, query_dim)
+            self.v_proj = nn.Linear(visual_dim, query_dim)
+            self.attn = nn.MultiheadAttention(query_dim, num_heads, batch_first=True)
+            self.out = nn.Linear(query_dim, self.tri)
+        else:
+            self.queries = None
 
         if self.qcond:
             self.qc_norm = nn.LayerNorm(self.d_model)
@@ -58,7 +62,7 @@ class LayerVRMG(nn.Module):
             nn.init.zeros_(self.qc_proj.weight)
             nn.init.zeros_(self.qc_proj.bias)
 
-        if multifreq:
+        if self.multifreq:
             self.n_low = max(1, round(total * 0.25))
             self.n_high = max(1, round(total * 0.375))
             self.n_mid = total - self.n_low - self.n_high
@@ -66,7 +70,7 @@ class LayerVRMG(nn.Module):
             nn.init.zeros_(self.gate.weight)
             nn.init.zeros_(self.gate.bias)
 
-        if tokrot:
+        if self.tokrot:
             nb_d = self.d_model // block_size
             self.nb_d = nb_d
             self.tok_norm = nn.LayerNorm(self.d_model)
@@ -101,7 +105,7 @@ class LayerVRMG(nn.Module):
             nn.init.zeros_(self.hyb_out.weight)
             nn.init.zeros_(self.hyb_out.bias)
 
-        if identity_init:
+        if identity_init and not self.no_rot:
             nn.init.zeros_(self.out.weight)
             nn.init.zeros_(self.out.bias)
 
@@ -126,59 +130,63 @@ class LayerVRMG(nn.Module):
                 x_text: torch.Tensor = None, ans_start=None, text_mask=None) -> dict:
         bsz = visual.shape[0]
         kpm = (visual_mask == 0) if visual_mask is not None else None
-        qs = self.queries.unsqueeze(0).expand(bsz, -1, -1)
-        if self.qcond and x_text is not None:
-            if x_text.shape[0] == bsz:
-                q_list = []
-                for b_i in range(bsz):
-                    a0 = max(1, min(int(ans_start[b_i]), x_text.shape[1])) if ans_start is not None and b_i < len(ans_start) else x_text.shape[1]
-                    xb = x_text[b_i, :a0].float()
-                    if text_mask is not None and text_mask.shape[0] == bsz and text_mask.shape[1] == x_text.shape[1]:
-                        mb = text_mask[b_i, :a0].to(xb.dtype).unsqueeze(-1)
-                        den = mb.sum().clamp(min=1.0)
-                        q_list.append((xb * mb).sum(dim=0, keepdim=True) / den)
-                    else:
-                        q_list.append(xb.mean(dim=0, keepdim=True))
-                q_mean = torch.stack(q_list, dim=0)
-                q_txt = self.qc_proj(self.qc_norm(q_mean)).to(qs.dtype)
-                qs = qs + q_txt
-
-        if not self.multifreq:
-            k = self.k_proj(visual)
-            v = self.v_proj(visual)
-            ctx, _ = self.attn(qs, k, v, key_padding_mask=kpm, need_weights=False)
-        else:
-            L = visual.shape[1]
-            dev = visual.device
-            k_all, v_all = self.k_proj(visual), self.v_proj(visual)
-            if visual_mask is not None:
-                pooled = (visual * visual_mask.unsqueeze(-1)).sum(1, keepdim=True) / \
-                         visual_mask.sum(1, keepdim=True).clamp(min=1).unsqueeze(-1)
-            else:
-                pooled = visual.mean(1, keepdim=True)
-            k_low, v_low = self.k_proj(pooled), self.v_proj(pooled)
-            pe_mid = self._pos_encoding(L, self.qdim, dev, base=10000.0).to(k_all.dtype)
-            pe_high = self._pos_encoding(L, self.qdim, dev, base=50.0).to(k_all.dtype)
-            i0, i1 = self.n_low, self.n_low + self.n_mid
-            ctxs = [
-                self._band_attn(qs[:, :i0], k_low, v_low, None, 1.0),
-                self._band_attn(qs[:, i0:i1], k_all + pe_mid, v_all, kpm, 1.0),
-                self._band_attn(qs[:, i1:], k_all + pe_high, v_all, kpm, 0.25),
-            ]
-            ctx = torch.cat(ctxs, dim=1)
-        vals = self.out(ctx)
-
         out = {}
-        for name, nb in self.blocks.items():
-            seg = vals[:, self.offsets[name] : self.offsets[name] + nb]
-            out[name] = _cayley_blocks(seg, self.block_size)
-        if self.multifreq:
-            out["gate"] = (self.gate, self.offsets)
-        if self.tokrot:
-            pe = self._pos_encoding(visual.shape[1], self.qdim, visual.device, base=500.0).to(visual.dtype)
-            tk = self.tok_k(visual) + pe
-            tv = self.tok_v(visual)
-            out["tokrot"] = (self, tk, tv, kpm, {})
+        if self.no_rot:
+            for name in self.blocks:
+                out[name] = None
+        else:
+            qs = self.queries.unsqueeze(0).expand(bsz, -1, -1)
+            if self.qcond and x_text is not None:
+                if x_text.shape[0] == bsz:
+                    q_list = []
+                    for b_i in range(bsz):
+                        a0 = max(1, min(int(ans_start[b_i]), x_text.shape[1])) if ans_start is not None and b_i < len(ans_start) else x_text.shape[1]
+                        xb = x_text[b_i, :a0].float()
+                        if text_mask is not None and text_mask.shape[0] == bsz and text_mask.shape[1] == x_text.shape[1]:
+                            mb = text_mask[b_i, :a0].to(xb.dtype).unsqueeze(-1)
+                            den = mb.sum().clamp(min=1.0)
+                            q_list.append((xb * mb).sum(dim=0, keepdim=True) / den)
+                        else:
+                            q_list.append(xb.mean(dim=0, keepdim=True))
+                    q_mean = torch.stack(q_list, dim=0)
+                    q_txt = self.qc_proj(self.qc_norm(q_mean)).to(qs.dtype)
+                    qs = qs + q_txt
+
+            if not self.multifreq:
+                k = self.k_proj(visual)
+                v = self.v_proj(visual)
+                ctx, _ = self.attn(qs, k, v, key_padding_mask=kpm, need_weights=False)
+            else:
+                L = visual.shape[1]
+                dev = visual.device
+                k_all, v_all = self.k_proj(visual), self.v_proj(visual)
+                if visual_mask is not None:
+                    pooled = (visual * visual_mask.unsqueeze(-1)).sum(1, keepdim=True) / \
+                             visual_mask.sum(1, keepdim=True).clamp(min=1).unsqueeze(-1)
+                else:
+                    pooled = visual.mean(1, keepdim=True)
+                k_low, v_low = self.k_proj(pooled), self.v_proj(pooled)
+                pe_mid = self._pos_encoding(L, self.qdim, dev, base=10000.0).to(k_all.dtype)
+                pe_high = self._pos_encoding(L, self.qdim, dev, base=50.0).to(k_all.dtype)
+                i0, i1 = self.n_low, self.n_low + self.n_mid
+                ctxs = [
+                    self._band_attn(qs[:, :i0], k_low, v_low, None, 1.0),
+                    self._band_attn(qs[:, i0:i1], k_all + pe_mid, v_all, kpm, 1.0),
+                    self._band_attn(qs[:, i1:], k_all + pe_high, v_all, kpm, 0.25),
+                ]
+                ctx = torch.cat(ctxs, dim=1)
+            vals = self.out(ctx)
+
+            for name, nb in self.blocks.items():
+                seg = vals[:, self.offsets[name] : self.offsets[name] + nb]
+                out[name] = _cayley_blocks(seg, self.block_size)
+            if self.multifreq:
+                out["gate"] = (self.gate, self.offsets)
+            if self.tokrot:
+                pe = self._pos_encoding(visual.shape[1], self.qdim, visual.device, base=500.0).to(visual.dtype)
+                tk = self.tok_k(visual) + pe
+                tv = self.tok_v(visual)
+                out["tokrot"] = (self, tk, tv, kpm, {})
         if self.hybrid:
             pe = self._pos_encoding(visual.shape[1], self.qdim, visual.device, base=500.0).to(visual.dtype)
             ak = self.anc_k(visual) + pe
@@ -274,21 +282,6 @@ class RotatedLinear(nn.Module):
 
     def forward(self, x: torch.Tensor, R: torch.Tensor, gate=None, tokrot=None, hybrid=None, cfg=None) -> torch.Tensor:
         bsz, seq, dim = x.shape
-        nb = R.shape[1]
-        if R.shape[0] == 1 and bsz > 1:
-            R = R.expand(bsz, -1, -1, -1)
-        xb = x.reshape(bsz, seq, nb, self.block_size)
-        xr = torch.einsum("btrk,brkj->btrj", xb, R.to(x.dtype))
-        if gate is not None:
-            gate_mod, offsets = gate
-            if x.shape[-1] == gate_mod.in_features:
-                g = (2 * torch.sigmoid(gate_mod(x.float()))).to(x.dtype)
-                off = offsets[self.proj_name]
-                g = g[:, :, off : off + nb].unsqueeze(-1)
-                xr = xb + g * (xr - xb)
-        if tokrot is not None:
-            vrmg, tk, tv, kpm, tcache = tokrot
-            xr = vrmg.apply_tokrot(xr, x, self.proj_name, tk, tv, kpm, tcache)
         alpha_1d = None
         if cfg is not None and seq > 1 and cfg[0] < 1.0:
             pa = cfg[0]
@@ -300,10 +293,28 @@ class RotatedLinear(nn.Module):
                     if b_i < bsz and p0 < seq:
                         alpha_1d[b_i, p0:] = 1.0
             else:
-                # 左侧补齐的评测 prefill：最后一个位置即 Answer: 预测位，保持 1.0
                 alpha_1d[:, -1:] = 1.0
-            xr = xb + alpha_1d.unsqueeze(-1).unsqueeze(-1) * (xr - xb)
-        out_in = xr.reshape(bsz, seq, dim)
+        if R is None:
+            out_in = x
+        else:
+            nb = R.shape[1]
+            if R.shape[0] == 1 and bsz > 1:
+                R = R.expand(bsz, -1, -1, -1)
+            xb = x.reshape(bsz, seq, nb, self.block_size)
+            xr = torch.einsum("btrk,brkj->btrj", xb, R.to(x.dtype))
+            if gate is not None:
+                gate_mod, offsets = gate
+                if x.shape[-1] == gate_mod.in_features:
+                    g = (2 * torch.sigmoid(gate_mod(x.float()))).to(x.dtype)
+                    off = offsets[self.proj_name]
+                    g = g[:, :, off : off + nb].unsqueeze(-1)
+                    xr = xb + g * (xr - xb)
+            if tokrot is not None:
+                vrmg, tk, tv, kpm, tcache = tokrot
+                xr = vrmg.apply_tokrot(xr, x, self.proj_name, tk, tv, kpm, tcache)
+            if alpha_1d is not None:
+                xr = xb + alpha_1d.unsqueeze(-1).unsqueeze(-1) * (xr - xb)
+            out_in = xr.reshape(bsz, seq, dim)
         if hybrid is not None:
             vrmg, anc, hcache = hybrid
             dx = vrmg.apply_hybrid(x, anc, hcache)

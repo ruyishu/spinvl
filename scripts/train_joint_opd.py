@@ -36,36 +36,55 @@ B = "/data/ibu-bi-ai-share-disk"
 
 
 @torch.no_grad()
-def front_greedy_em(model, front, registry, tok, data, idx, paths, ip, dev, n=100, max_new=16):
-    """无外部视觉塔模型自己看原图 → PatchFront → VRMG 贪婪生成整段答案，算 EM。"""
+def front_greedy_em(model, front, registry, tok, data, idx, paths, ip, dev, n=1000, max_new=24, bs=8):
+    """无外部视觉塔模型自己看原图 → PatchFront → VRMG 批量贪婪生成整段答案，算 EM / 停止率 / 长度 / 3-gram 复读率。"""
     model.eval(); front.eval()
-    stops = set(topd.stop_ids(tok))
-    hit = stopped = tot_len = cnt = 0
-    for i in idx[:n]:
-        ids = tok(data["prompts"][i])["input_ids"]
-        img = Image.open(paths[data["ids"][i]]).convert("RGB")
-        o = ip(images=[img], return_tensors="pt")
-        v_hat, cl = front(o["pixel_values"].to(torch.float16).unsqueeze(0).to(dev), o["image_grid_thw"],
-                          [o["pixel_values"].shape[0]])
-        vis = v_hat[:, : cl[0]].float()
-        vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
-            out = model.generate(input_ids=torch.tensor([ids], device=dev), max_new_tokens=max_new,
-                                 do_sample=False, pad_token_id=tok.pad_token_id, eos_token_id=sorted(stops))
-        gen = out[0, len(ids):]
-        real = topd.cut_at_stop(gen, stops)
-        pred = tok.decode(real, skip_special_tokens=True)
-        hit += int(tf._norm(pred) == tf._norm(data["answers"][i]))
-        stopped += int(len(real) < len(gen))
-        tot_len += len(real)
-        cnt += 1
+    stops = topd.stop_ids(tok)
+    stop_set = set(stops)
+    pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
+    eval_idx = list(idx[:n])
+    hit = stopped = tot_len = rep3_cnt = cnt = 0
+    for s0 in range(0, len(eval_idx), bs):
+        chunk = eval_idx[s0 : s0 + bs]
+        pids = [tok(data["prompts"][i])["input_ids"] for i in chunk]
+        pad = max(len(x) for x in pids)
+        in_ids = torch.tensor([[pad_id] * (pad - len(x)) + x for x in pids], device=dev)
+        attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
+        pvs, grids, lens = [], [], []
+        for i in chunk:
+            img = Image.open(paths[data["ids"][i]]).convert("RGB")
+            o = ip(images=[img], return_tensors="pt")
+            pvs.append(o["pixel_values"].to(torch.float16))
+            grids.append(o["image_grid_thw"][0])
+            lens.append(o["pixel_values"].shape[0])
+        pv = torch.zeros(len(pvs), max(lens), pvs[0].shape[1], dtype=torch.float16, device=dev)
+        for j, p in enumerate(pvs):
+            pv[j, : lens[j]] = p.to(dev)
+        v_hat, cl = front(pv, torch.stack(grids), lens)
+        vis, vm = tj.pad_vis([v_hat[j, : cl[j]].float() for j in range(len(cl))], dev)
+        with rotation_context_with(registry, vis, vm, text_mask=attn):
+            out = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=max_new,
+                                 do_sample=False, pad_token_id=pad_id, eos_token_id=stops)
+        for j, i in enumerate(chunk):
+            gen = out[j, pad:]
+            raw_ids = [int(x) for x in gen.tolist()]
+            has_eos = any(t in stop_set for t in raw_ids)
+            real = topd.cut_at_stop(gen, stop_set)
+            pred = tok.decode(real, skip_special_tokens=True)
+            hit += int(tf._norm(pred) == tf._norm(data["answers"][i]))
+            stopped += int(has_eos)
+            tot_len += len(real)
+            ng3 = [tuple(real[m : m + 3]) for m in range(max(0, len(real) - 2))]
+            rep3_cnt += int(len(ng3) >= 2 and len(set(ng3)) < len(ng3))
+            cnt += 1
     front.train(); model.train()
-    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1), "mean_len": tot_len / max(cnt, 1)}
+    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1),
+            "mean_len": tot_len / max(cnt, 1), "rep3_rate": rep3_cnt / max(cnt, 1), "em_n": cnt}
 
 
-def full_front_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, n_acc=150, n_em=100, max_new=16):
-    ev = tj.joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, "front", n_acc=n_acc)
-    ev.update(front_greedy_em(model, front, registry, tok, data, idx, paths, ip, dev, n=n_em, max_new=max_new))
+def full_front_eval(model, front, registry, tok, data, val_loss_idx, val_em_idx, paths, ip, dev, seq, n_acc=150, n_em=1000, max_new=24):
+    ev = tj.joint_eval(model, front, registry, tok, data, val_loss_idx, paths, ip, dev, seq, "front", n_acc=n_acc)
+    ev.update(front_greedy_em(model, front, registry, tok, data, val_em_idx, paths, ip, dev, n=n_em, max_new=max_new))
     return ev
 
 
@@ -79,14 +98,15 @@ def main():
     ap.add_argument("--seq", type=int, default=256)
     ap.add_argument("--bs", type=int, default=4)
     ap.add_argument("--accum", type=int, default=1, help="梯度累积：每个优化步用 accum 个 bs 大小的微批")
-    ap.add_argument("--steps", type=int, default=500)
-    ap.add_argument("--max-new", type=int, default=16)
+    ap.add_argument("--steps", type=int, default=600)
+    ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--min-new", type=int, default=1)
     ap.add_argument("--gen-temp", type=float, default=0.7)
     ap.add_argument("--kd-temp", type=float, default=1.0)
-    ap.add_argument("--kl-mode", choices=["fwd", "rev", "jsd", "seqkd"], default="fwd",
-                    help="在线蒸馏散度类型：fwd=Forward KL(Ours), rev=Reverse KL(MiniLLM), jsd=JSD(GKD), seqkd=Hard Top-1(SeqKD)")
-    ap.add_argument("--ce-weight", type=float, default=0.5)
+    ap.add_argument("--kl-mode", choices=["none", "offkd", "fwd", "rev", "jsd", "seqkd"], default="fwd",
+                    help="后训练类型：none=C0(仅CE+feat), offkd=C1(金标前缀离线KD), fwd=C2(Forward-KL OPD), jsd=C3(JSD OPD)")
+    ap.add_argument("--kl-weight", type=float, default=0.25, help="蒸馏损失权重（C0 设为 0，C1/C2/C3 默认 0.25）")
+    ap.add_argument("--ce-weight", type=float, default=1.0)
     ap.add_argument("--feat-weight", type=float, default=0.2)
     ap.add_argument("--prompt-alpha", type=float, default=1.0, help="Prompt 段旋转强度掩码（<1 保留原 LLM 读题能力）")
     ap.add_argument("--hyb-bound", type=float, default=0.0, help="hybrid 残差相对范数上限（>0 防长序列激活爆炸）")
@@ -95,13 +115,14 @@ def main():
     ap.add_argument("--hybrid", action="store_true")
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
+    ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
     ap.add_argument("--lr-vrmg", type=float, default=2e-5)
     ap.add_argument("--lr-front", type=float, default=1e-5)
     ap.add_argument("--tune-backbone", action="store_true", help="OPD 同时更新学生 LLM 主干")
     ap.add_argument("--backbone-lr", type=float, default=1e-5)
     ap.add_argument("--n-eval", type=int, default=600)
     ap.add_argument("--n-acc", type=int, default=150)
-    ap.add_argument("--n-em", type=int, default=100)
+    ap.add_argument("--n-em", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -119,10 +140,11 @@ def main():
     data = tf.load_data(args.data)
     n = len(data["ids"])
     train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
-    val_eval = val[: args.n_eval]
-    train = [i for i in train if data["ids"][i] in paths]
     val = [i for i in val if data["ids"][i] in paths]
+    train = [i for i in train if data["ids"][i] in paths]
     assert train and val, "按图切分后可用 train/val 为空"
+    val_eval = val[: args.n_eval]
+    val_em_1000, val_1000_sha1 = tf.select_stratified_val_1000(val, data, n_target=args.n_em, seed=0)
 
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     tok.padding_side = "right"
@@ -156,6 +178,7 @@ def main():
         multifreq=multifreq, tokrot=tokrot, hybrid=hybrid, prompt_alpha=pa, hyb_bound=hb,
         qcond=bool(args.qcond or ja.get("qcond", False) or a1.get("qcond", False)),
         direct_hyb=bool(args.direct_hyb or ja.get("direct_hyb", False) or a1.get("direct_hyb", False)),
+        no_rot=bool(args.no_rot or ja.get("no_rot", False) or a1.get("no_rot", False)),
     )
     for m, sd in zip(vrmgs, jck["vrmg"]):
         m.load_state_dict(sd)
@@ -175,28 +198,38 @@ def main():
             p.requires_grad_(True)
     backbone_params = [p for p in bparams if all(p is not q for q in fparams + vparams)]
 
-    teacher = AutoModelForImageTextToText.from_pretrained(args.teacher, dtype=torch.bfloat16, device_map=dev,
-                                                          trust_remote_code=True).eval()
-    for p in teacher.parameters():
-        p.requires_grad_(False)
+    need_teacher = (args.kl_mode != "none" and args.kl_weight > 0.0)
+    teacher = None
+    if need_teacher:
+        teacher = AutoModelForImageTextToText.from_pretrained(args.teacher, dtype=torch.bfloat16, device_map=dev,
+                                                              trust_remote_code=True).eval()
+        for p in teacher.parameters():
+            p.requires_grad_(False)
 
-    log(f"=== Tower-Free VL-OPD ckpt={os.path.basename(args.joint_ckpt)} front={ja.get('front_mode')} K={K} "
-        f"mf={multifreq} tokrot={tokrot} hybrid={hybrid} steps={args.steps} bs={args.bs} ===")
+    log(f"=== Tower-Free Post-Train mode={args.kl_mode} kl_w={args.kl_weight} ce_w={args.ce_weight} feat_w={args.feat_weight} "
+        f"ckpt={os.path.basename(args.joint_ckpt)} front={ja.get('front_mode')} K={K} "
+        f"mf={multifreq} hybrid={hybrid} steps={args.steps} bs={args.bs} val_em_n={len(val_em_1000)} ===")
 
-    result = {"args": vars(args), "joint_args": ja}
-    init_ev = full_front_eval(model, front, registry, tok, data, val_eval, paths, ip, dev, args.seq,
-                              n_acc=args.n_acc, n_em=args.n_em, max_new=args.max_new)
+    result = {"args": vars(args), "joint_args": ja, "split_info": split_info, "val_em_sha1": val_1000_sha1}
+    init_ev = full_front_eval(model, front, registry, tok, data, val_eval, val_em_1000, paths, ip, dev, args.seq,
+                              n_acc=args.n_acc, n_em=len(val_em_1000), max_new=args.max_new)
     result["init_eval"] = init_ev
-    log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items()))
+    log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items() if isinstance(v, (int, float))))
 
     opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr_vrmg},
                              {"params": fparams, "lr": args.lr_front}] +
                             ([{"params": backbone_params, "lr": args.backbone_lr}] if backbone_params else []),
                             weight_decay=0.01)
+    if not args.tune_backbone:
+        opt_ids = {id(p) for g in opt.param_groups for p in g["params"]}
+        allowed_ids = {id(p) for p in fparams + vparams}
+        assert opt_ids == allowed_ids, "Optimizer 包含非白名单参数！"
+        assert all(not p.requires_grad for p in model.parameters()), "冻结模式下原始 LLM 存在 requires_grad=True 参数！"
     base_lrs = [g["lr"] for g in opt.param_groups]
     all_params = fparams + vparams + backbone_params
     collate_fn = tj.make_collate(data, paths, ip, tok, args.seq, False)
     t0, hist = time.time(), []
+    eos_id = tok.eos_token_id
 
     for ms in range(1, args.steps * args.accum + 1):
         step, micro = (ms - 1) // args.accum + 1, (ms - 1) % args.accum
@@ -213,64 +246,75 @@ def main():
         in_ids = torch.tensor([[pad_id] * (pad - len(x)) + x for x in pids], device=dev)
         attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
 
-        # 1. 学生用自己的内置前端（无外部视觉塔）看原图并自回归 rollout
-        with torch.no_grad():
-            front.eval()
-            vh_ng, cl_ng = front(b["pv"].to(dev), b["grid"], b["lens"])
-            vis_ng, vm_ng = tj.pad_vis([vh_ng[i, : cl_ng[i]].float() for i in range(len(cl_ng))], dev)
-            with rotation_context_with(registry, vis_ng, vm_ng,
-                                       ans_start=[pad] * len(pids), text_mask=attn):
-                gen = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=args.max_new,
-                                     min_new_tokens=args.min_new, do_sample=args.gen_temp > 0,
-                                     temperature=max(args.gen_temp, 1e-5), top_p=0.9,
-                                     pad_token_id=pad_id, eos_token_id=stops)
-            front.train()
-        gids = [topd.cut_at_stop(gen[k, pad:], set(stops), include_stop=True) for k in range(len(idx))]
+        kl_terms = []
+        gids = [[] for _ in idx]
+        if need_teacher:
+            if args.kl_mode == "offkd":
+                # C1：使用金标答案（含 EOS）作为对齐前缀轨迹
+                gids = [tok(" " + data["answers"][i], add_special_tokens=False)["input_ids"][: args.max_new - 1]
+                        + ([eos_id] if eos_id is not None else []) for i in idx]
+            else:
+                # C2 / C3：学生用内置前端看原图并自回归 rollout
+                with torch.no_grad():
+                    front.eval()
+                    vh_ng, cl_ng = front(b["pv"].to(dev), b["grid"], b["lens"])
+                    vis_ng, vm_ng = tj.pad_vis([vh_ng[i, : cl_ng[i]].float() for i in range(len(cl_ng))], dev)
+                    with rotation_context_with(registry, vis_ng, vm_ng,
+                                               ans_start=[pad] * len(pids), text_mask=attn):
+                        gen = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=args.max_new,
+                                             min_new_tokens=args.min_new, do_sample=args.gen_temp > 0,
+                                             temperature=max(args.gen_temp, 1e-5), top_p=0.9,
+                                             pad_token_id=pad_id, eos_token_id=stops)
+                    front.train()
+                gids = [topd.cut_at_stop(gen[k, pad:], set(stops), include_stop=True) for k in range(len(idx))]
 
-        # 2. VL 老师用原装视觉塔看同一张原图，对学生的生成轨迹逐 token 打分
-        imgs = [Image.open(paths[data["ids"][i]]).convert("RGB") for i in idx]
-        enc, Lp, bad = topd.build_teacher_batch(proc, prompts, pids, gids, imgs, dev, pad_id)
-        with torch.no_grad():
-            tlog = teacher(**enc).logits
+            imgs = [Image.open(paths[data["ids"][i]]).convert("RGB") for i in idx]
+            enc, Lp, bad = topd.build_teacher_batch(proc, prompts, pids, gids, imgs, dev, pad_id)
+            if ms == 1:
+                assert sum(bad) == 0, f"师生轨迹 token 对齐检查失败：bad={bad}"
+                log(f"TOKEN_ALIGN_CHECK passed on batch size {len(idx)} (bad=0, Lp={Lp})")
+            with torch.no_grad():
+                tlog = teacher(**enc).logits
 
-        # 3. 带梯度前向：PatchFront 产生活体 v̂，同时算学生轨迹上的在线 KL 与真值 CE 锚点
+        # 带梯度前向：PatchFront 产生活体 v̂
         v_hat, cl = front(b["pv"].to(dev), b["grid"], b["lens"])
         vis, vm = tj.pad_vis([v_hat[i, : cl[i]] for i in range(len(cl))], dev)
 
-        maxa = max([len(g) for g in gids] + [1])
-        tail = torch.full((len(idx), maxa), pad_id, dtype=in_ids.dtype, device=dev)
-        tmask = torch.zeros(len(idx), maxa, dtype=attn.dtype, device=dev)
-        for k, g in enumerate(gids):
-            if g:
-                tail[k, : len(g)] = torch.tensor(g, device=dev)
-                tmask[k, : len(g)] = 1
-        seq_ids, smask = torch.cat([in_ids, tail], dim=1), torch.cat([attn, tmask], dim=1)
-        pos = (smask.cumsum(-1) - 1).clamp(min=0)
-        with rotation_context_with(registry, vis, vm, ans_start=[pad] * len(idx), text_mask=smask):
-            s_lg = model(input_ids=seq_ids, attention_mask=smask, position_ids=pos).logits[:, pad - 1 : pad - 1 + maxa].float()
+        if need_teacher:
+            maxa = max([len(g) for g in gids] + [1])
+            tail = torch.full((len(idx), maxa), pad_id, dtype=in_ids.dtype, device=dev)
+            tmask = torch.zeros(len(idx), maxa, dtype=attn.dtype, device=dev)
+            for k, g in enumerate(gids):
+                if g:
+                    tail[k, : len(g)] = torch.tensor(g, device=dev)
+                    tmask[k, : len(g)] = 1
+            seq_ids, smask = torch.cat([in_ids, tail], dim=1), torch.cat([attn, tmask], dim=1)
+            pos = (smask.cumsum(-1) - 1).clamp(min=0)
+            with rotation_context_with(registry, vis, vm, ans_start=[pad] * len(idx), text_mask=smask):
+                s_lg = model(input_ids=seq_ids, attention_mask=smask, position_ids=pos).logits[:, pad - 1 : pad - 1 + maxa].float()
 
-        T = args.kd_temp
-        kl_terms = []
-        for k, g in enumerate(gids):
-            if not g or bad[k]:
-                continue
-            na = len(g)
-            t_logp = F.log_softmax(tlog[k, Lp - 1 : Lp - 1 + na].float() / T, dim=-1)
-            s_logp = F.log_softmax(s_lg[k, :na] / T, dim=-1)
-            if args.kl_mode == "fwd":
-                kl_terms.append((t_logp.exp() * (t_logp - s_logp)).sum(-1).mean())
-            elif args.kl_mode == "rev":
-                s_p = s_logp.exp()
-                kl_terms.append((s_p * (s_logp - t_logp)).sum(-1).mean())
-            elif args.kl_mode == "jsd":
-                t_p, s_p = t_logp.exp(), s_logp.exp()
-                m_logp = torch.log(0.5 * (t_p + s_p).clamp(min=1e-12))
-                kl_terms.append((0.5 * (t_p * (t_logp - m_logp)).sum(-1) + 0.5 * (s_p * (s_logp - m_logp)).sum(-1)).mean())
-            elif args.kl_mode == "seqkd":
-                t_top = t_logp.argmax(dim=-1)
-                kl_terms.append(F.nll_loss(s_logp, t_top) / (T ** 2))
+            T = args.kd_temp
+            for k, g in enumerate(gids):
+                if not g or bad[k]:
+                    continue
+                na = len(g)
+                t_logp = F.log_softmax(tlog[k, Lp - 1 : Lp - 1 + na].float() / T, dim=-1)
+                s_logp = F.log_softmax(s_lg[k, :na] / T, dim=-1)
+                if args.kl_mode in ("fwd", "offkd"):
+                    kl_terms.append((t_logp.exp() * (t_logp - s_logp)).sum(-1).mean())
+                elif args.kl_mode == "rev":
+                    s_p = s_logp.exp()
+                    kl_terms.append((s_p * (s_logp - t_logp)).sum(-1).mean())
+                elif args.kl_mode == "jsd":
+                    t_p, s_p = t_logp.exp(), s_logp.exp()
+                    m_logp = torch.log(0.5 * (t_p + s_p).clamp(min=1e-12))
+                    kl_terms.append((0.5 * (t_p * (t_logp - m_logp)).sum(-1) + 0.5 * (s_p * (s_logp - m_logp)).sum(-1)).mean())
+                elif args.kl_mode == "seqkd":
+                    t_top = t_logp.argmax(dim=-1)
+                    kl_terms.append(F.nll_loss(s_logp, t_top) / (T ** 2))
 
-        loss = torch.stack(kl_terms).mean() * (T ** 2) if kl_terms else torch.tensor(0.0, device=dev)
+        kl_loss = torch.stack(kl_terms).mean() * (args.kd_temp ** 2) if kl_terms else torch.tensor(0.0, device=dev)
+        loss = args.kl_weight * kl_loss if need_teacher else torch.tensor(0.0, device=dev)
         if args.ce_weight > 0:
             ids_g, mask_g, lab_g = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
             with rotation_context_with(registry, vis, vm, ans_start=b["a0s"], text_mask=mask_g):
@@ -283,7 +327,7 @@ def main():
 
         if bool(torch.isfinite(loss)) and loss.requires_grad:
             (loss / args.accum).backward()
-        hist.append((float(loss.item()), len(kl_terms), sum(len(g) for g in gids) / len(gids)))
+        hist.append((float(loss.item()), len(kl_terms), sum(len(g) for g in gids) / max(len(gids), 1)))
         if micro < args.accum - 1:
             continue
         gn = torch.nn.utils.clip_grad_norm_(all_params, 1.0)
@@ -294,15 +338,20 @@ def main():
                 f"len={sum(x[2] for x in h)/len(h):.1f}tok gn={float(gn):.2f} {(time.time()-t0)/step:.2f}s/it")
 
     result["train_seconds"] = time.time() - t0
-    fin_ev = full_front_eval(model, front, registry, tok, data, val_eval, paths, ip, dev, args.seq,
-                             n_acc=args.n_acc, n_em=args.n_em, max_new=args.max_new)
+    fin_ev = full_front_eval(model, front, registry, tok, data, val_eval, val_em_1000, paths, ip, dev, args.seq,
+                             n_acc=args.n_acc, n_em=len(val_em_1000), max_new=args.max_new)
     result["eval"] = fin_ev
     result["delta"] = {k: fin_ev[k] - init_ev[k] for k in fin_ev if isinstance(fin_ev[k], float)}
     result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024 ** 3
-    log("FINAL[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in fin_ev.items()))
+    log("FINAL[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in fin_ev.items() if isinstance(v, (int, float))))
     log("DELTA[after - before]: " + " ".join(f"{k}={v:+.4f}" for k, v in result["delta"].items()))
+    save_args = dict(ja)
+    save_args["post_kl_mode"] = args.kl_mode
+    save_args["post_kl_weight"] = args.kl_weight
+    save_args["post_steps"] = args.steps
+    save_args["seed"] = args.seed
     json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
-    torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": ja,
+    torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": save_args,
                 "backbone": model.state_dict() if args.tune_backbone else None}, args.out + ".pt")
     log("JOINT_OPD_DONE")
 

@@ -50,7 +50,7 @@ def make_collate(data, paths, ip, tok, seq, need_teacher):
             pv[j, : lens[j]] = p
         return dict(ids=ids, mask=mask, labels=labels, k_ids=k_ids, k_vals=k_vals, k_mask=k_mask, hidden=hidden,
                     pv=pv, grid=torch.stack(grids), lens=lens, tgts=tgts,
-                    a0s=[data["a_rel_start"][i] for i in idx_list])
+                    a0s=[data["a_rel_start"][i] for i in idx_list], batch_idx=list(idx_list))
     return fn
 
 
@@ -65,51 +65,62 @@ def pad_vis(v_list, dev):
 
 
 @torch.no_grad()
-def joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, source, n_acc=150, bs=8):
-    """source: 'front'（v̂）或 'teacher'（老师视觉特征）。返回 CE(配对/打乱/无图) 与 teacher-forced 准确率。"""
+def joint_eval(model, front, registry, tok, data, idx, paths, ip, dev, seq, source, n_acc=150, bs=8, shuf_seed=20261112):
+    """source: 'front'（v̂）或 'teacher'（老师视觉特征）。返回 CE(配对/严格异图/无图) 与 teacher-forced 准确率。"""
     model.eval(); front.eval()
-    tot = {"correct": 0.0, "shuffled": 0.0, "no_image": 0.0}
-    cnt = 0
+    idx = list(idx)
+    shuf_idx, same_cnt, perm_sha1 = tf.build_index_derangement(idx, data, paths, seed=shuf_seed)
+    assert same_cnt == 0, f"joint_eval 异图置换存在 {same_cnt} 对同图样本！"
+    pos_of = {orig_i: p for p, orig_i in enumerate(idx)}
+    perm_pos = [pos_of[s_i] for s_i in shuf_idx]
+
     dl = DataLoader(idx, batch_size=bs, collate_fn=make_collate(data, paths, ip, tok, seq, False),
-                    num_workers=2)
+                    num_workers=2, shuffle=False)
+    batches_meta = []
+    vis_by_pos = []
     for b in dl:
-        ids, mask, labels = b["ids"].to(dev), b["mask"].to(dev), b["labels"].to(dev)
         if source == "front":
             v_hat, cl = front(b["pv"].to(dev), b["grid"], b["lens"])
-            vis_list = [v_hat[i, : cl[i]].float() for i in range(len(cl))]
+            vis_list = [v_hat[i, : cl[i]].float().cpu() for i in range(len(cl))]
         else:
-            vis_list = [t.to(dev) for t in b["tgts"]]
-        vis, vm = pad_vis(vis_list, dev)
-        perm = torch.tensor([(i + 1) % len(vis_list) for i in range(len(vis_list))])
-        for key, v, m in (("correct", vis, vm), ("shuffled", vis[perm], vm[perm]), ("no_image", None, None)):
+            vis_list = [t.float().cpu() for t in b["tgts"]]
+        vis_by_pos.extend(vis_list)
+        batches_meta.append((b["ids"], b["mask"], b["labels"], b["a0s"], len(vis_list)))
+
+    tot = {"correct": 0.0, "shuffled": 0.0, "no_image": 0.0}
+    cnt = 0
+    offset = 0
+    for ids_cpu, mask_cpu, labels_cpu, a0s, b_len in batches_meta:
+        ids, mask, labels = ids_cpu.to(dev), mask_cpu.to(dev), labels_cpu.to(dev)
+        vis_real_list = [vis_by_pos[offset + k].to(dev) for k in range(b_len)]
+        vis_shuf_list = [vis_by_pos[perm_pos[offset + k]].to(dev) for k in range(b_len)]
+        vis, vm = pad_vis(vis_real_list, dev)
+        vis_shuf, vm_shuf = pad_vis(vis_shuf_list, dev)
+        for key, v, m in (("correct", vis, vm), ("shuffled", vis_shuf, vm_shuf), ("no_image", None, None)):
             if v is None:
                 lg = model(input_ids=ids, attention_mask=mask).logits.float()
             else:
-                with rotation_context_with(registry, v, m, ans_start=b["a0s"], text_mask=mask):
+                with rotation_context_with(registry, v, m, ans_start=a0s, text_mask=mask):
                     lg = model(input_ids=ids, attention_mask=mask).logits.float()
             tot[key] += F.cross_entropy(lg[:, :-1].reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1)).item()
         cnt += 1
+        offset += b_len
     ce = {k: v / max(cnt, 1) for k, v in tot.items()}
 
     first = full = n = 0
-    for i in idx[:n_acc]:
+    for pos, i in enumerate(idx[:n_acc]):
         text = data["prompts"][i] + " " + data["answers"][i]
         tid = tok(text)["input_ids"]
         a0, na = data["a_rel_start"][i], data["n_answer"][i]
-        if source == "front":
-            o = ip(images=[Image.open(paths[data["ids"][i]]).convert("RGB")], return_tensors="pt")
-            v_hat, cl = front(o["pixel_values"].to(torch.float16).unsqueeze(0).to(dev), o["image_grid_thw"],
-                              [o["pixel_values"].shape[0]])
-            vis = v_hat[:, : cl[0]].float()
-        else:
-            vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
+        vis = vis_by_pos[pos].unsqueeze(0).to(dev).float()
         vm = torch.ones(1, vis.shape[1], device=dev)
         with rotation_context_with(registry, vis, vm, ans_start=[a0], text_mask=torch.ones(1, len(tid), device=dev)):
             lg = model(input_ids=torch.tensor([tid], device=dev)).logits[0].float()
         preds = [lg[a0 - 1 + k].argmax().item() for k in range(na)]
         first += int(preds[0] == tid[a0]); full += int(preds == tid[a0 : a0 + na]); n += 1
     front.train()
-    return {**ce, "gap": ce["shuffled"] - ce["correct"], "tf_first": first / max(n, 1), "tf_full": full / max(n, 1)}
+    return {**ce, "gap": ce["shuffled"] - ce["correct"], "tf_first": first / max(n, 1), "tf_full": full / max(n, 1),
+            "shuf_same_image_count": same_cnt, "shuf_perm_sha1": perm_sha1}
 
 
 def main():
@@ -127,6 +138,7 @@ def main():
     ap.add_argument("--hyb-bound", type=float, default=0.0, help="hybrid 残差相对范数上限（>0 防长序列激活爆炸）")
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
+    ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
     ap.add_argument("--K", type=int, default=4)
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--model", default=f"{B}/zk/model/Qwen3-1.7B")
@@ -184,7 +196,8 @@ def main():
                                       wrap_extra=[l for l in range(K) if l not in layers],
                                       prompt_alpha=pa, hyb_bound=hb,
                                       qcond=args.qcond or a1.get("qcond", False),
-                                      direct_hyb=args.direct_hyb or a1.get("direct_hyb", False))
+                                      direct_hyb=args.direct_hyb or a1.get("direct_hyb", False),
+                                      no_rot=args.no_rot or a1.get("no_rot", False))
     for m, sd in zip(vrmgs, ck["state"]):
         m.load_state_dict(sd)
     front = PatchFront(model, K=K, mode=args.front_mode, vdim=data["vfeat"][0].shape[-1],
@@ -193,7 +206,14 @@ def main():
         front.load_state_dict(torch.load(args.front_ckpt, map_location=dev)["front"])
     log(f"=== joint stage={args.stage} front={args.front_mode} K={K} arm={args.arm} train={len(train)} "
         f"val={len(val)} eval_n={len(val_eval)} split={split_info} ===")
-    result = {"args": vars(args)}
+    n_front_tot = sum(p.numel() for p in front.trainable_params())
+    n_static = sum(p.numel() for p in (front.static.parameters() if front.static is not None else []))
+    n_merger = sum(p.numel() for p in front.merger.parameters())
+    n_vrmg = sum(p.numel() for m in vrmgs for p in m.parameters())
+    result = {"args": vars(args), "split_info": split_info,
+              "param_counts": {"front_total": int(n_front_tot), "static_only": int(n_static),
+                               "merger_only": int(n_merger), "vrmg_total": int(n_vrmg),
+                               "joint_trainable_total": int(n_front_tot + n_vrmg)}}
     t0 = time.time()
 
     if args.stage == "joint":
@@ -240,22 +260,26 @@ def main():
             ce = F.cross_entropy(lg.reshape(-1, lg.shape[-1]), labels[:, 1:].reshape(-1))
             loss = ce + args.feat_weight * fl
             if args.gnd_weight > 0.0 and ids.shape[0] >= 2:
-                perm = torch.tensor([(j + 1) % ids.shape[0] for j in range(ids.shape[0])], device=dev)
-                with rotation_context_with(registry, vis[perm], vm[perm], ans_start=b["a0s"], text_mask=mask):
-                    out_shuf = model(input_ids=ids, attention_mask=mask)
-                lg_shuf = out_shuf.logits.float()[:, :-1]
-                p0_list = []
-                for j, a0 in enumerate(b["a0s"]):
-                    if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
-                        a0 = a0 + 1
-                    p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
-                p0 = torch.tensor(p0_list, device=dev)
-                b_idx = torch.arange(ids.shape[0], device=dev)
-                y0 = ids[b_idx, p0 + 1]
-                nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
-                nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
-                gnd = F.relu(args.gnd_margin - (nll_shuf - nll_real)).mean()
-                loss = loss + args.gnd_weight * gnd
+                perm_list, valid_list = tf.build_inbatch_diff_image_perm(b["batch_idx"], data, paths)
+                if any(v > 0 for v in valid_list):
+                    perm = torch.tensor(perm_list, device=dev)
+                    valid_m = torch.tensor(valid_list, device=dev)
+                    with rotation_context_with(registry, vis[perm], vm[perm], ans_start=b["a0s"], text_mask=mask):
+                        out_shuf = model(input_ids=ids, attention_mask=mask)
+                    lg_shuf = out_shuf.logits.float()[:, :-1]
+                    p0_list = []
+                    for j, a0 in enumerate(b["a0s"]):
+                        if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
+                            a0 = a0 + 1
+                        p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
+                    p0 = torch.tensor(p0_list, device=dev)
+                    b_idx = torch.arange(ids.shape[0], device=dev)
+                    y0 = ids[b_idx, p0 + 1]
+                    nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
+                    nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
+                    gnd_raw = F.relu(args.gnd_margin - (nll_shuf - nll_real))
+                    gnd = (gnd_raw * valid_m).sum() / valid_m.sum().clamp(min=1.0)
+                    loss = loss + args.gnd_weight * gnd
             if args.arm in ("kd", "rel"):
                 k_ids, k_vals, k_mask = b["k_ids"].to(dev), b["k_vals"].to(dev), b["k_mask"].to(dev)
                 kd = tf.topk_conditional_kl(lg, k_ids, k_vals, k_mask, args.kd_temp)
@@ -280,7 +304,7 @@ def main():
             if step % max(args.steps // 4, 200) == 0 and step < args.steps:
                 ev = joint_eval(model, front, registry, tok, data, val_eval[:160], paths, ip, dev, args.seq, "front",
                                 n_acc=60)
-                log(f"  eval@{step} (front v̂): " + " ".join(f"{k}={v:.4f}" for k, v in ev.items()))
+                log(f"  eval@{step} (front v̂): " + " ".join(f"{k}={v:.4f}" for k, v in ev.items() if isinstance(v, (int, float))))
         result["train_seconds"] = time.time() - t0
 
     srcs = {"oracle": ["teacher"], "front_frozen": ["front"], "joint": ["front", "teacher"]}[args.stage]
@@ -288,7 +312,7 @@ def main():
     for s in srcs:
         ev = joint_eval(model, front, registry, tok, data, val_eval, paths, ip, dev, args.seq, s)
         result["eval"][s] = ev
-        log(f"FINAL[{s}] " + " ".join(f"{k}={v:.4f}" for k, v in ev.items()))
+        log(f"FINAL[{s}] " + " ".join(f"{k}={v:.4f}" for k, v in ev.items() if isinstance(v, (int, float))))
     result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024**3
     json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
     if args.stage == "joint":

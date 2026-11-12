@@ -110,7 +110,7 @@ Method & Mix & Tower & Tok. & FLOPs$\downarrow$ & MMStar$\uparrow$ & Hallu.$\upa
 \midrule
 \multicolumn{11}{@{}l}{\textit{Reference (Upper \& Lower Bounds)}} \\
 {\color{gray}Teacher (Qwen3-VL-8B-Instruct, 8B)} & {\color{gray}---} & {\color{gray}0.4B ViT} & {\color{gray}all} & {\color{gray}$2.25\times$} & {\color{gray}65.80} & {\color{gray}72.45} & {\color{gray}63.20} & {\color{gray}69.13} & {\color{gray}67.15} & {\color{gray}59.03} \\
-{\color{gray}Blank-Image Reference (Qwen3-1.7B, Black Image)} & {\color{gray}---} & {\color{gray}---} & {\color{gray}0} & {\color{gray}$0.02\times$} & {\color{gray}23.73} & {\color{gray}48.16} & {\color{gray}19.40} & {\color{gray}35.95} & {\color{gray}30.43} & {\color{gray}15.58} \\
+{\color{gray}\modelname-Tower Blank-Image Control (Black Image)} & {\color{gray}$44$k} & {\color{gray}0.4B ViT} & {\color{gray}0} & {\color{gray}$0.69\times$} & {\color{gray}23.73} & {\color{gray}48.16} & {\color{gray}19.40} & {\color{gray}35.95} & {\color{gray}30.43} & {\color{gray}15.58} \\
 \midrule
 \multicolumn{11}{@{}l}{\textit{With External Vision Tower (0.41B ViT, $21$k Base Mixture, $s{=}0$)}} \\
 LLaVA-Proj~\citep{liu2024improved} (Full Tokens)        & $21$k & 0.4B ViT & all & $1.00\times$ & \underline{29.60} & 53.10 & \textbf{24.90} & \underline{41.35} & \textbf{35.87} & \textbf{21.02} \\
@@ -133,7 +133,7 @@ EVE-style Copy~\citep{diao2024eve} ($K{=}4$, $201$M, \texttt{rel} init) & $21$k 
 Static Cayley Rotation (\texttt{rot} $K{=}4$, $2.3$M, \texttt{rel} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 25.20 & \textbf{56.26} & 20.20 & 40.73 & \textbf{33.89} & \underline{17.55} \\
 VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$ + \texttt{mf}, \texttt{ce} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 15.82 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{mf}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.33} & \underline{55.31} & 18.00 & \textbf{41.32} & 33.55 & 17.33 \\
-\textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 27.20 & 53.21 & \underline{20.30} & 40.21 & 33.57 & 17.37 \\
+\textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 27.20 & 53.21 & \underline{20.30} & 40.20 & 33.57 & 17.37 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $28$k & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & 54.57 & 19.10 & \underline{41.09} & \underline{33.76} & \textbf{17.58} \\
 \midrule
 \multicolumn{11}{@{}l}{\textit{Encoder-Free + On-Policy Distillation (No Vision Tower, $s{=}0$)}} \\
@@ -288,7 +288,7 @@ full copy          & rel & single & 201M  & 1.745 & 1.857 & 43.3/20.0 & 38.82 & 
 \midrule
 LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 30.73 & 15.82 \\
 \textbf{\texttt{rots}} & ce & mf  & \textbf{2.40M} & 1.549 & \textbf{1.783} & 43.3/17.3 & \textbf{41.32} & \textbf{33.55} & \textbf{17.33} \\
-\textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.21 & \textbf{33.57} & \textbf{17.37} \\
+\textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.20 & \textbf{33.57} & \textbf{17.37} \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -299,13 +299,12 @@ first $K{=}4$ layers into a vision encoder on the $21$k base mixture ($s{=}0$),
 with every row's validation and public metrics taken from the exact same
 checkpoint. Within the \texttt{rel}-initialised single-frequency group, pure
 rotation (\texttt{rot}) reaches $40.73\%$ MC2 and $17.55\%$ Avg6 with $2.32$M
-parameters, ahead of copying the layers ($38.82\%$, $201$M) and of dropping the
+in-layer parameters, ahead of copying the layers ($38.82\%$, $201$M) and of dropping the
 layers entirely ($35.92\%$, $K{=}0$). Within the \texttt{ce}-initialised group,
 holding the deep tier fixed at \texttt{mf}, rotation with channel scaling
 (\texttt{rots}) beats rank-$16$ LoRA by $+4.48$ points of MC2 ($41.32\%$ vs.\
 $36.84\%$), $+2.82$ points of Core3 ($33.55\%$ vs.\ $30.73\%$), and a larger
-validation grounding gap ($1.783$ vs.\ $1.667$) while using $36\%$ fewer
-frontend parameters ($2.40$M vs.\ $3.74$M). Even with a single-frequency deep
+validation grounding gap ($1.783$ vs.\ $1.667$). Even with a single-frequency deep
 tier, \texttt{rots} ($38.14\%$ MC2) exceeds LoRA+\texttt{mf} ($36.84\%$).
 
 \paragraph{Depth of the built-in encoder.}
@@ -496,7 +495,7 @@ Model ($44$k Debiased, $s{=}0$) & Val Gap$\uparrow$ & MMStar & Hallu. & MathV. &
  & (nats) & (Real/Shuf) & (Real/Shuf) & (Real/Shuf) & (Real) & (Real) \\
 \midrule
 {\color{gray}Teacher (8B VLM)} & --- & {\color{gray}66.7/29.5} & {\color{gray}72.7/57.1} & {\color{gray}62.5/33.2} & {\color{gray}69.70} & {\color{gray}67.30} \\
-LLaVA-Proj (Full Tok.)         & --- & \textbf{30.1}/29.9 & \textbf{55.4}/54.1 & \textbf{24.4}/24.1 & \textbf{42.77} & \textbf{36.65} \\
+LLaVA-Proj (Full Tok.)         & --- & \textbf{30.1}/29.9 & \textbf{55.4}/54.0 & \textbf{24.4}/24.1 & \textbf{42.77} & \textbf{36.65} \\
 \midrule
 ROSE (Tower, 0 Tok.)           & 0.899 & \textbf{28.7}/28.5 & 46.2/45.7 & 18.7/19.4 & 37.45 & 31.20 \\
 \textbf{\modelname-Tower (Ours)} & \textbf{1.373} & 27.5/28.7 & \textbf{55.3}/52.3 & \textbf{19.0}/19.2 & \textbf{41.42} & \textbf{33.95} \\

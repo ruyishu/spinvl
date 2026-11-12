@@ -1,5 +1,5 @@
-"""评测用的三种模型形态：tower / tower_free / proj。
-修复开放题禁词乌龙：放开 Yes/No，仅在非选择题生成的第 0 步用 LogitsProcessor 屏蔽孤立选项字母 ' A'~' E'（第 1 步起全词表放开）。
+"""评测用的四种模型形态：tower / tower_free / proj / base。
+所有模型采用完全统一的贪心生成协议：取消按榜单首 token 禁词，统一提示、长度、EOS 与重复限制。
 """
 
 import gc
@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import torch
-from transformers import LogitsProcessor, LogitsProcessorList
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,19 +16,6 @@ from front import PatchFront  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
-
-
-class FirstStepBanLetterProcessor(LogitsProcessor):
-    """仅在生成的第 0 个 token（cur_len == prompt_len）屏蔽孤立选项字母 token，后续步骤完全不干预。"""
-
-    def __init__(self, prompt_len: int, ban_ids):
-        self.prompt_len = prompt_len
-        self.ban_ids = ban_ids
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        if input_ids.shape[1] == self.prompt_len:
-            scores[:, self.ban_ids] = float("-inf")
-        return scores
 
 
 def load_vision_tower(teacher, dev):
@@ -78,6 +64,9 @@ class Runner:
         self.model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.bfloat16, device_map=dev,
                                                           trust_remote_code=True).eval()
         freeze_all_but(self.model, [])
+        if mode == "base":
+            self.arch = {"base": True, "model_path": model_path}
+            return
         ck = torch.load(ckpt, map_location=dev)
         if mode in ("tower", "tower_free"):
             if mode == "tower":
@@ -90,9 +79,8 @@ class Runner:
                 K = 0 if front_mode == "none" else int(ja.get("K", 4))
                 states = ck["vrmg"]
             layers = [int(x) for x in a1["layers"].split(",") if x]
-            kw = {f: bool(ja.get(f, False) or a1.get(f, False) or f"--{f}" in flags)
-                  for f in ("multifreq", "tokrot", "hybrid", "qcond")}
-            kw["direct_hyb"] = bool(ja.get("direct_hyb", False) or a1.get("direct_hyb", False) or "--direct-hyb" in flags)
+            kw = {f: bool(ja.get(f, False) or a1.get(f, False) or f"--{f}" in flags or f"--{f.replace('_', '-')}" in flags)
+                  for f in ("multifreq", "tokrot", "hybrid", "qcond", "direct_hyb", "no_rot")}
             pa = float(prompt_alpha) if prompt_alpha is not None else float(ja.get("prompt_alpha", a1.get("prompt_alpha", 1.0)))
             hb = float(hyb_bound) if hyb_bound is not None else float(ja.get("hyb_bound", a1.get("hyb_bound", 0.0)))
             vrmgs, self.registry = attach_rotation(self.model, layers, block_size=a1["block"], visual_dim=self.vdim,
@@ -168,10 +156,17 @@ class Runner:
             if need_gen:
                 gkw = dict(**enc, max_new_tokens=max_new, do_sample=False,
                            no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
-                if items and bench in ("chartqa", "mathvista", "geometry3k") and not force_gen:
-                    gkw["logits_processor"] = LogitsProcessorList([FirstStepBanLetterProcessor(Lp, self.step0_ban_ids)])
                 gen = self.model.generate(**gkw)
                 tails = [g[Lp:] for g in gen]
+        elif self.mode == "base":
+            ids = torch.tensor([[self.pad_id] * (pad - len(x)) + x for x in pids], device=self.dev)
+            lg = self.model(input_ids=ids, attention_mask=attn).logits[:, -1, :].float() if any(is_mc) else None
+            tails = []
+            if need_gen:
+                gkw = dict(input_ids=ids, attention_mask=attn, max_new_tokens=max_new, do_sample=False,
+                           no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
+                gen = self.model.generate(**gkw)
+                tails = [g[pad:] for g in gen]
         elif self.mode in ("proj", "proj_pool32", "proj_fastv32"):
             pv, grid, lens = self._pix(images)
             feats = self._vision_feats(pv, grid, lens)
@@ -199,8 +194,6 @@ class Runner:
             if need_gen:
                 gkw = dict(inputs_embeds=E, attention_mask=M, max_new_tokens=max_new, do_sample=False,
                            no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
-                if items and bench in ("chartqa", "mathvista", "geometry3k") and not force_gen:
-                    gkw["logits_processor"] = LogitsProcessorList([FirstStepBanLetterProcessor(n, self.step0_ban_ids)])
                 gen = self.model.generate(**gkw)
                 tails = [g for g in gen]
         else:
@@ -218,8 +211,6 @@ class Runner:
                 if need_gen:
                     gkw = dict(input_ids=ids, attention_mask=attn, max_new_tokens=max_new, do_sample=False,
                                no_repeat_ngram_size=0 if force_gen else 3, pad_token_id=self.pad_id, eos_token_id=self.stops)
-                    if items and bench in ("chartqa", "mathvista", "geometry3k") and not force_gen:
-                        gkw["logits_processor"] = LogitsProcessorList([FirstStepBanLetterProcessor(pad, self.step0_ban_ids)])
                     gen = self.model.generate(**gkw)
                     tails = [g[pad:] for g in gen]
         out, stats = [], []

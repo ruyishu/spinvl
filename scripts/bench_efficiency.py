@@ -34,14 +34,25 @@ def grid_for(n):
     return torch.tensor([[1, s, s]]), s * s
 
 
-def timed(fn, warm=2, runs=8):
+def timed_stats(fn, warm=2, runs=8):
     for _ in range(warm):
         fn()
     torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
     ts = []
     for _ in range(runs):
         t = time.time(); fn(); torch.cuda.synchronize(); ts.append((time.time() - t) * 1000)
-    return statistics.median(ts)
+    peak_gib = torch.cuda.max_memory_allocated() / 1024 ** 3
+    return {
+        "median_ms": statistics.median(ts),
+        "mean_ms": statistics.mean(ts),
+        "std_ms": statistics.stdev(ts) if len(ts) > 1 else 0.0,
+        "peak_gib": peak_gib,
+    }
+
+
+def timed(fn, warm=2, runs=8):
+    return timed_stats(fn, warm=warm, runs=runs)["median_ms"]
 
 
 def flops_of(fn):
@@ -61,6 +72,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--K", type=int, default=4)
     ap.add_argument("--Ns", default="256,576,1024,2304,4096")
+    ap.add_argument("--gen-tokens", type=int, default=24)
     ap.add_argument("--front-ckpt", default="")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -69,8 +81,9 @@ def main():
                                                  trust_remote_code=True).eval()
     layers = [0, 4, 8, 12, 16, 20, 24]
     vrmgs, registry = attach_rotation(model, layers, block_size=64, visual_dim=4096, query_dim=256,
-                                      wrap_extra=[l for l in range(args.K) if l not in layers])
-    front = PatchFront(model, K=args.K, mode="rot", vdim=4096).to(dev)
+                                      wrap_extra=[l for l in range(args.K) if l not in layers],
+                                      multifreq=True, hybrid=True, qcond=True, direct_hyb=True)
+    front = PatchFront(model, K=args.K, mode="rots", vdim=4096).to(dev)
     if args.front_ckpt:
         front.load_state_dict(torch.load(args.front_ckpt, map_location=dev)["front"])
     front.eval()
@@ -91,15 +104,31 @@ def main():
             tower_in = torch.randn(n_patch, 1536, device=dev, dtype=torch.bfloat16)
             vis_tok = torch.randn(1, cells, model.config.hidden_size, device=dev, dtype=torch.bfloat16)
 
+            attn_txt = torch.ones_like(txt)
+
             def ours():
                 vh, cl = front(pv, grid, [n_patch])
-                with rotation_context_with(registry, vh, vm[:, : cl[0]]):
-                    return model(input_ids=txt)
+                with rotation_context_with(registry, vh, vm[:, : cl[0]], text_mask=attn_txt):
+                    return model(input_ids=txt, attention_mask=attn_txt)
+
+            def ours_e2e():
+                vh, cl = front(pv, grid, [n_patch])
+                with rotation_context_with(registry, vh, vm[:, : cl[0]], text_mask=attn_txt):
+                    return model.generate(input_ids=txt, attention_mask=attn_txt,
+                                          max_new_tokens=args.gen_tokens, min_new_tokens=args.gen_tokens,
+                                          do_sample=False, pad_token_id=151643)
 
             def rose():
                 tower(tower_in, grid_thw=grid)
-                with rotation_context_with(registry, v_hat, vm):
-                    return model(input_ids=txt)
+                with rotation_context_with(registry, v_hat, vm, text_mask=attn_txt):
+                    return model(input_ids=txt, attention_mask=attn_txt)
+
+            def rose_e2e():
+                tower(tower_in, grid_thw=grid)
+                with rotation_context_with(registry, v_hat, vm, text_mask=attn_txt):
+                    return model.generate(input_ids=txt, attention_mask=attn_txt,
+                                          max_new_tokens=args.gen_tokens, min_new_tokens=args.gen_tokens,
+                                          do_sample=False, pad_token_id=151643)
 
             def keep():
                 e = torch.cat([vis_tok, emb(txt)], dim=1)
@@ -110,8 +139,16 @@ def main():
                 e = torch.cat([vis_tok, emb(txt)], dim=1)
                 return model(inputs_embeds=e)
 
-            row = {"N_patches": n_patch, "cells": cells}
-            # 解析式 FLOPs（不依赖 PyTorch FlopCounterMode，2.8 下会触发内部断言）
+            def llava_e2e():
+                tower(tower_in, grid_thw=grid)
+                e = torch.cat([vis_tok, emb(txt)], dim=1)
+                m = torch.ones(1, e.shape[1], device=dev, dtype=torch.long)
+                return model.generate(inputs_embeds=e, attention_mask=m,
+                                      max_new_tokens=args.gen_tokens, min_new_tokens=args.gen_tokens,
+                                      do_sample=False, pad_token_id=151643)
+
+            row = {"N_patches": n_patch, "cells": cells, "gen_tokens": args.gen_tokens}
+            # 解析式估算 FLOPs（含 Transformer 主干、视觉塔/PatchFront、以及 7 层 VRMG 旋转生成+Cayley+块乘法+direct_hyb 交叉注意力）
             cfg = model.config
             d, ff = cfg.hidden_size, cfg.intermediate_size
             q_dim = cfg.num_attention_heads * getattr(cfg, "head_dim", d // cfg.num_attention_heads)
@@ -127,30 +164,66 @@ def main():
 
             def front_flops(n):
                 pe = 2 * n * 1536 * d
+                # StaticRotScale 在前 K 层每步额外对输入做 64x64 块正交乘法
+                rot_in = args.K * 2 * n * (4 * d + 3 * ff) * 64
                 body = transformer_flops(d, ff, args.K, n, q_dim, kv_dim, causal=False) * 1e12
                 mg = 2 * (n // 4) * (4 * d) * 4096 * 2
-                return (pe + body + mg) / 1e12
+                return (pe + rot_in + body + mg) / 1e12
+
+            def vrmg_flops(n_cells, seq_len, include_hyb=True):
+                n_vrmg = len(layers)
+                total_blocks = (4 * d + 2 * kv_dim + 3 * ff) // 64
+                qdim_v = 256
+                # 1. k/v 投影 + query cross-attention + out 线性层 + Cayley 64x64 求逆
+                kv_proj = 2 * 2 * n_cells * 4096 * qdim_v
+                q_attn = 2 * 2 * total_blocks * n_cells * qdim_v
+                out_lin = 2 * total_blocks * qdim_v * (64 * 63 // 2)
+                cayley = total_blocks * (2 * (64 ** 3))
+                # 2. 文本序列在 7 个旋转投影上的 64x64 块乘法
+                apply_rot = 2 * seq_len * (4 * d + 2 * kv_dim + 3 * ff) * 64
+                # 3. direct_hyb 256 维窄子空间视觉交叉注意力
+                hyb = 0
+                if include_hyb:
+                    hyb = 2 * 2 * n_cells * 4096 * qdim_v + 2 * seq_len * d * qdim_v * 2 + 2 * 2 * seq_len * n_cells * qdim_v
+                return n_vrmg * (kv_proj + q_attn + out_lin + cayley + apply_rot + hyb) / 1e12
 
             tf_map = {
-                "ours": front_flops(n_patch) + transformer_flops(d, ff, cfg.num_hidden_layers, Q, q_dim, kv_dim),
-                "rose": tower_flops(n_patch) + transformer_flops(d, ff, cfg.num_hidden_layers, Q, q_dim, kv_dim),
+                "ours": front_flops(n_patch) + transformer_flops(d, ff, cfg.num_hidden_layers, Q, q_dim, kv_dim) + vrmg_flops(cells, Q, True),
+                "rose": tower_flops(n_patch) + transformer_flops(d, ff, cfg.num_hidden_layers, Q, q_dim, kv_dim) + vrmg_flops(cells, Q, False),
                 "keep": transformer_flops(d, ff, cfg.num_hidden_layers, cells + Q, q_dim, kv_dim),
                 "llava": tower_flops(n_patch) + transformer_flops(d, ff, cfg.num_hidden_layers, cells + Q, q_dim, kv_dim),
             }
+            e2e_map = {"ours": ours_e2e, "rose": rose_e2e, "llava": llava_e2e}
             for name, fn in (("ours", ours), ("rose", rose), ("keep", keep), ("llava", llava)):
                 try:
-                    row[name] = {"tflops": tf_map[name], "ms": timed(fn)}
-                except Exception as e:  # 极端长度可能显存不够，记录而不中断；类型+末帧位置必须记，空消息异常否则看不出原因
+                    pf_st = timed_stats(fn)
+                    entry = {
+                        "tflops": tf_map[name],
+                        "est_prefill_tflops": tf_map[name],
+                        "ms": pf_st["median_ms"],
+                        "prefill_ms": pf_st["median_ms"],
+                        "prefill_std_ms": pf_st["std_ms"],
+                        "peak_gib": pf_st["peak_gib"],
+                    }
+                    if name in e2e_map:
+                        e2e_st = timed_stats(e2e_map[name], warm=1, runs=5)
+                        entry["total_ms"] = e2e_st["median_ms"]
+                        entry["decode_ms"] = max(0.0, e2e_st["median_ms"] - pf_st["median_ms"])
+                        entry["e2e_peak_gib"] = e2e_st["peak_gib"]
+                    row[name] = entry
+                except Exception as e:
                     tb = traceback.extract_tb(e.__traceback__)[-1]
                     row[name] = {"error": f"{type(e).__name__}: {str(e)[:160]} @ {os.path.basename(tb.filename)}:{tb.lineno}"}
                     print(f"[bench] {name} N={n_patch} failed: {row[name]['error']}", flush=True)
-            row["peak_gib"] = torch.cuda.max_memory_allocated() / 1024**3
+            row["peak_gib"] = max((row[k].get("peak_gib", 0.0) for k in ("ours", "rose", "keep", "llava") if isinstance(row.get(k), dict)), default=0.0)
             print(json.dumps(row), flush=True)
             rows.append(row)
             torch.cuda.reset_peak_memory_stats()
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    json.dump({"K": args.K, "Q": Q, "rows": rows,
-               "note": "latency 仅在独占 GPU 时可信；keep 不计 K 层读图的额外开销（偏向对手）"},
+    json.dump({"K": args.K, "Q": Q, "gen_tokens": args.gen_tokens,
+               "arch": {"front_mode": "rots", "multifreq": True, "hybrid": True, "qcond": True, "direct_hyb": True},
+               "rows": rows,
+               "note": "est_prefill_tflops 为包含 VRMG/Cayley/direct_hyb 的解析式估算；prefill_ms/decode_ms/total_ms 为独占 GPU 实测"},
               open(args.out, "w"), indent=1)
     print("BENCH_DONE")
 

@@ -3,6 +3,8 @@
 import math
 import re
 
+SCORER_VERSION = "clean_v6_official_relaxed_v1"
+
 _NUM = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s*/\s*(\d+(?:\.\d+)?))?")
 _BOXED = re.compile(r"\\boxed\{([^{}]+)\}")
 _YN_MAP = {"true": "yes", "false": "no", "y": "yes", "n": "no"}
@@ -101,9 +103,23 @@ def _tf(t):
         return None
 
 
+def extract_answer_text(pred: str) -> str:
+    """统一答案抽取：优先取 \\boxed{...}，否则取首个非空行并剥离标准前缀与末尾句号。"""
+    s = str(pred or "").strip()
+    mb = _BOXED.findall(s)
+    if mb:
+        s = mb[-1].strip()
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    s = lines[0] if lines else ""
+    s = _ANS_PREFIX.sub("", s).strip()
+    return s.rstrip(".").strip()
+
+
 def hit_relaxed(pred, golds):
-    """ChartQA 官方 relaxed correctness：数值相对误差 ≤5%（支持从句子/boxed 中抽首个数值），文本支持 Yes/No 与 True/False 同义归一。"""
-    p = _ANS_PREFIX.sub("", pred.strip()).strip()
+    """ChartQA 官方 relaxed correctness：数值相对误差 ≤5%（仅当显式带 % 时做百分数换算），非数值要求同义归一后精确匹配（无任意包含匹配）。"""
+    p = extract_answer_text(pred)
+    if not p:
+        return False
     p_has_pct = "%" in p
     for g in golds:
         g_str = str(g).strip()
@@ -119,16 +135,13 @@ def hit_relaxed(pred, golds):
             else:
                 if abs(pf - gf) / abs(gf) <= 0.05:
                     return True
-                if (p_has_pct or g_has_pct or abs(gf) <= 1.0) and abs(pf / 100.0 - gf) / abs(gf) <= 0.05:
+                if (p_has_pct or g_has_pct) and abs(pf / 100.0 - gf) / abs(gf) <= 0.05:
                     return True
         else:
             gs = _YN_MAP.get(g_str.lower().rstrip("."), g_str.lower().rstrip("."))
             ps = _YN_MAP.get(p.lower().rstrip("."), p.lower().rstrip("."))
             if ps == gs:
                 return True
-            if len(gs) >= 2 and re.search(r"(?<![a-z0-9])" + re.escape(gs) + r"(?![a-z0-9])", ps):
-                if not _has_negation_before(ps, gs):
-                    return True
     return False
 
 
@@ -210,6 +223,9 @@ def selftest():
     assert pick_choice("yesterday", ["Yes", "No"]) == -1
     assert hit_relaxed("14", ["14"]) and hit_relaxed("The answer is 14.5", ["14"]) and not hit_relaxed("15", ["14"])
     assert not hit_relaxed("1400", ["14"]) and not hit_relaxed("not blue", ["blue"])
+    assert not hit_relaxed("100", ["1"]) and not hit_relaxed("10", ["0.1"])
+    assert not hit_relaxed("The. The. No. The", ["No"])
+    assert hit_relaxed("24%", ["0.24"]) and hit_relaxed("24", ["24%"])
     assert hit_relaxed("False", ["No"]) and hit_relaxed("True", ["Yes"])
     assert first_number("1e3") == 1000.0 and first_number("1/2") == 0.5
     assert not hit_mv_free("10.4", "10", "float", 2)

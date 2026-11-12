@@ -25,10 +25,14 @@ same on-policy distillation stage.
 
 \paragraph{Static rotation with channel scaling.}
 A pure orthogonal rotation preserves norms and angles but cannot change
-singular values, so it can re-aim features without re-weighting channels. We
-therefore compose a rotation with a learned diagonal rescaling,
+singular values, so it can re-aim features without re-weighting channels. For a
+linear projection $y = x W^{\top} + b$, we first rotate each $b$-dimensional
+input block and then apply a learned per-channel diagonal scaling
+$d\in\mathbb{R}^{d_{\text{in}}}$ before multiplying by $W^{\top}$, i.e.\
+$y = ((x R_{\mathrm{s}})\odot d)W^{\top} + b$, which is equivalent to the
+transformed weight
 \begin{equation}
-W' = W\,R_{\mathrm{s}}\,\mathrm{diag}(d),
+W' = W\,\mathrm{diag}(d)\,R_{\mathrm{s}}^{\top},
 \qquad
 R_{\mathrm{s}} = (I-A)^{-1}(I+A),
 \label{eq:static}
@@ -37,8 +41,11 @@ where $A$ is skew-symmetric, $R_{\mathrm{s}}\in SO(b)$ acts on $b{=}64$
 channel blocks, and $d\in\mathbb{R}^{d_{\text{in}}}$ is initialised to ones.
 Because $R_{\mathrm{s}}$ is orthogonal, training stays well conditioned and
 the rescaling supplies the degrees of freedom that orthogonality removes. For
-$K{=}4$ layers and seven projections this amounts to $2.4$M parameters,
-compared with $201$M for copying the layers and $3.7$M for rank-$16$ LoRA.
+$K{=}4$ layers and seven projections on a $1.7$B backbone, the static
+in-layer module has $2.40$M parameters (versus $2.49$M for rank-$16$ LoRA and
+$201$M for duplicating the four layers), while all encoder-free variants share
+the same $3.67$M patch/positional embedding and $50.36$M $2{\times}2$ cell
+merger ($56.42$M vs.\ $56.52$M total frontend parameters).
 
 \paragraph{Reading the image once.}
 Image patches are linearly embedded and given row and column positional
@@ -55,11 +62,14 @@ concatenated and projected by a two-layer merger into one cell feature,
 yielding $\hat{v}\in\mathbb{R}^{N_c\times d_v}$ with $N_c=N/4$.
 
 \paragraph{Discard, then modulate.}
-After Eq.~\eqref{eq:merge} the image tokens are deleted: the remaining
-$L-K$ layers see a purely textual sequence. The only trace of the image is
-$\hat{v}$, which drives the deep rotations of Sec.~\ref{sec:dynamic}. This is
-the structural difference from built-in-encoder approaches that keep the
-patches in the sequence.
+After Eq.~\eqref{eq:merge} the $N$ image patch tokens are deleted: the text
+sequence of length $T$ is then processed through all $L$ layers of the frozen
+LLM without any visual tokens in its self-attention sequence (paying
+$O(K N^2 + L T^2)$ attention instead of $O(L(T+N_c)^2)$). The only trace of the
+image during the text pass is $\hat{v}\in\mathbb{R}^{N_c\times d_v}$, which
+drives the deep modulation of Sec.~\ref{sec:dynamic}. This separates our
+two-phase design from built-in-encoder approaches that keep visual tokens in the
+sequence across all $L$ layers.
 
 \paragraph{Optional feature supervision.}
 When a teacher encoder is available during training we align $\hat{v}$ with
@@ -79,7 +89,12 @@ switched off entirely.
 
 \paragraph{Generating a rotation per layer.}
 For a layer $\ell\in\mathcal{S}$ we keep $N_b$ learnable queries
-$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Visual features are
+$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Optionally, under
+\emph{question conditioning} (\texttt{qcond}), the mean-pooled prompt hidden
+state $\bar x_{\text{prompt}}$ at layer $\ell$ is projected by a
+zero-initialised linear layer $W_{qc}^{(\ell)}\mathrm{LN}(\bar x_{\text{prompt}})$
+and added to $Q_\ell$ so the rotation queries depend on the question as well as
+the image. Visual cell features $V\in\mathbb{R}^{N_c\times d_v}$ are
 projected to keys and values, and the queries read out a context
 \begin{equation}
 C_\ell = \mathrm{MHA}\big(Q_\ell,\; W_k^{(\ell)}V,\; W_v^{(\ell)}V\big),
@@ -125,9 +140,9 @@ so the model starts from the pretrained function and adds rotation only where
 it helps. This variant favours multi-step reasoning over diagrams, where the
 model must repeatedly consult a small region.
 
-\paragraph{Spatial-anchor hybrid (\texttt{hyb}).}
-The second variant keeps the orthogonal rotation and adds a residual that can
-address a few locations,
+\paragraph{Spatial-anchor and direct narrow-subspace hybrid (\texttt{hyb} / \texttt{direct\_hyb}).}
+The second variant keeps the orthogonal rotation and adds a narrow-subspace
+cross-attention residual before the frozen linear projection,
 \begin{equation}
 \Delta x = W_{\mathrm{out}}\,
 \mathrm{MHA}\big(W_q\,\mathrm{LN}(x),\, K_a,\, V_a\big),
@@ -135,14 +150,20 @@ address a few locations,
 y=\big(xR_\ell+\Delta x\big)W^{\top}+b,
 \label{eq:hyb}
 \end{equation}
-where $K_a,V_a$ come from $M{=}16$ learnable anchors pooled from $V$, and
-$W_{\mathrm{out}}$ is zero-initialised. The cross-attention lives in the
-$d_q$-dimensional subspace, so it costs $O(TM d_q)$ instead of
-$O(TN d)$; no visual token enters self-attention. This variant favours
-perception and hallucination tests, where a single global transform is too
-coarse to decide whether a small object is present.
+where $W_{\mathrm{out}}$ is zero-initialised. In the pooled-anchor variant
+(\texttt{hyb}), $K_a,V_a\in\mathbb{R}^{M\times d_q}$ come from $M{=}16$
+learnable spatial anchors pooled from $V$; in the uncompressed direct variant
+(\texttt{direct\_hyb}), $K_a,V_a\in\mathbb{R}^{N_c\times d_q}$ project all $N_c$
+visual cells directly into the $d_q{=}256$ narrow subspace (with a post-attention
+LayerNorm before $W_{\mathrm{out}}$). In both cases the cross-attention operates
+in $d_q{=}256\ll d$ and no visual token enters the LLM's self-attention KV
+cache. To isolate the contribution of orthogonal rotation from this additive
+cross-attention path, we also evaluate a strict \emph{cross-attention-only}
+ablation (\texttt{no\_rot}, $R_\ell\equiv I$, removing the rotation generator
+entirely).
 
-Both variants are single switches; the backbone stays frozen in all cases.
+All variants are controlled by explicit flags while the LLM backbone stays
+strictly frozen.
 
 \subsection{Modality Decoupling}
 \label{sec:decouple}

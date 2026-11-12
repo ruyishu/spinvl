@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
-from train_final import load_data  # noqa: E402
+from train_final import load_data, split_train_val_by_image as tf_split_by_image  # noqa: E402
 from wrap import attach_rotation, freeze_all_but  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -69,39 +69,24 @@ def main():
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
     ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
-    items, views = imgdata.make_items(load_data, args.source)
-    vjoined = imgdata.Joined(views)
-    # 按真实图片内容 SHA1 分组切分 train/val，优先复用 existing_img_hashes_v2.pt 免去 NFS 逐文件重算
-    import hashlib
-    hcache_p = f"{B}/zk/project/rose-distill/data/existing_img_hashes_v2.pt"
-    hcache = torch.load(hcache_p, map_location="cpu", weights_only=False) if os.path.exists(hcache_p) else {}
-    by_img, path_sha = {}, {}
-    for it_pair in items:
-        rp = os.path.realpath(it_pair[1])
-        if rp not in path_sha:
-            if rp in hcache and hcache[rp] is not None:
-                path_sha[rp] = hcache[rp][0].hex()
-            else:
-                path_sha[rp] = hashlib.sha1(open(rp, "rb").read()).hexdigest() if os.path.exists(rp) else rp
-        by_img.setdefault(path_sha[rp], []).append(it_pair)
-    img_keys = sorted(by_img.keys())
-    random.Random(0).shuffle(img_keys)
-    val_items, train_items, val_imgs, train_imgs = [], [], set(), set()
-    for k in img_keys:
-        if len(val_items) < args.n_val:
-            val_items.extend(by_img[k])
-            val_imgs.add(k)
-        else:
-            train_items.extend(by_img[k])
-            train_imgs.add(k)
-    assert len(val_imgs & train_imgs) == 0, "train_front: train 与 val 存在共享图片！"
-    rnd2 = random.Random(args.seed)
-    rnd2.shuffle(train_items)
-    log(f"=== front mode={args.mode} K={args.K} train={len(train_items)}({len(train_imgs)} imgs) "
-        f"val={len(val_items)}({len(val_imgs)} imgs) overlap=0 ===")
+    meta_list, paths = [], {}
+    for spec in args.source:
+        m_p, p_map = imgdata.parse_source(spec)
+        meta_list.append(m_p)
+        paths.update(p_map)
+    data = load_data(",".join(meta_list))
+    train_idx, val_idx, split_info = tf_split_by_image(data, paths, seed=args.seed)
+    train_items = [(i, paths[data["ids"][i]]) for i in train_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
+    val_items = [(i, paths[data["ids"][i]]) for i in val_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
+    if args.n_val and args.n_val < len(val_items):
+        val_eval_items = val_items[: args.n_val]
+    else:
+        val_eval_items = val_items
+    log(f"=== front mode={args.mode} K={args.K} train={len(train_items)} val={len(val_items)}(eval={len(val_eval_items)}) "
+        f"split={split_info} ===")
 
-    train_ds = imgdata.FrontDataset(train_items, vjoined, ip)
-    val_ds = imgdata.FrontDataset(val_items, vjoined, ip)
+    train_ds = imgdata.FrontDataset(train_items, data["vfeat"], ip)
+    val_ds = imgdata.FrontDataset(val_eval_items, data["vfeat"], ip)
     train_ld = DataLoader(train_ds, batch_size=args.bs, shuffle=True, num_workers=args.workers,
                           collate_fn=imgdata.collate, drop_last=True, persistent_workers=True)
     val_ld = DataLoader(val_ds, batch_size=args.bs, shuffle=False, num_workers=2, collate_fn=imgdata.collate)
@@ -126,8 +111,12 @@ def main():
         p.requires_grad_(True)
     n_tr = sum(p.numel() for p in params)
     n_static = sum(p.numel() for p in (front.static.parameters() if front.static is not None else []))
+    n_merger = sum(p.numel() for p in front.merger.parameters())
+    n_patch = sum(p.numel() for p in front.patch_embed.parameters()) + \
+              sum(p.numel() for p in front.row_emb.parameters()) + \
+              sum(p.numel() for p in front.col_emb.parameters())
     n_copy = sum(p.numel() for p in (front.copies.parameters() if front.copies is not None else []))
-    log(f"trainable={n_tr/1e6:.1f}M (static={n_static/1e6:.2f}M, copies={n_copy/1e6:.1f}M) vdim={vdim}")
+    log(f"trainable={n_tr/1e6:.3f}M (static={n_static/1e6:.3f}M, merger={n_merger/1e6:.3f}M, patch_pos={n_patch/1e6:.3f}M, copies={n_copy/1e6:.1f}M) vdim={vdim}")
 
     groups = [{"params": [p for p in params if all(p is not q for q in
                 (list(front.static.parameters()) if front.static is not None else []))
@@ -175,10 +164,14 @@ def main():
     c = evaluate(front, val_ld, dev, 100)
     ex = {k: evaluate(front, ld, dev, 40) for k, ld in eval_lds.items()}
     log(f"FINAL val_cos={c:.4f} " + " ".join(f"{k}={v:.4f}" for k, v in ex.items()))
-    torch.save({"front": {k: v for k, v in front.state_dict().items()}, "args": vars(args), "vdim": vdim},
+    torch.save({"front": {k: v for k, v in front.state_dict().items()}, "args": vars(args), "vdim": vdim,
+                "split_info": split_info},
                args.out + ".pt")
-    json.dump({"args": vars(args), "val_cos": c, "extra_cos": ex, "trainable_M": n_tr / 1e6,
-               "static_M": n_static / 1e6, "seconds": time.time() - t0,
+    json.dump({"args": vars(args), "split_info": split_info, "val_cos": c, "extra_cos": ex,
+               "trainable_M": n_tr / 1e6, "static_M": n_static / 1e6,
+               "front_total_params": int(n_tr), "static_params": int(n_static),
+               "merger_params": int(n_merger), "patch_pos_params": int(n_patch),
+               "seconds": time.time() - t0,
                "peak_gib": torch.cuda.max_memory_allocated() / 1024**3}, open(args.out + ".json", "w"), indent=1)
     log("FRONT_DONE")
 

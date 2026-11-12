@@ -194,6 +194,7 @@ def main():
     ap.add_argument("--hybrid", action="store_true")
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
+    ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
     ap.add_argument("--gen-temp", type=float, default=0.8)
     ap.add_argument("--min-new", type=int, default=1, help="只防空输出，不硬拽废话")
     ap.add_argument("--kd-temp", type=float, default=1.0)
@@ -256,7 +257,8 @@ def main():
                                       visual_dim=data["vfeat"][0].shape[-1], query_dim=a1["query_dim"],
                                       prompt_alpha=pa, hyb_bound=hb,
                                       qcond=args.qcond or a1.get("qcond", False),
-                                      direct_hyb=args.direct_hyb or a1.get("direct_hyb", False))
+                                      direct_hyb=args.direct_hyb or a1.get("direct_hyb", False),
+                                      no_rot=args.no_rot or a1.get("no_rot", False))
     for m, sd in zip(vrmgs, ck["state"]):
         m.load_state_dict(sd)
     freeze_all_but(model, [])

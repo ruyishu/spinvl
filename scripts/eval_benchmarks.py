@@ -38,8 +38,9 @@ def _item_img_key(it, idx):
     return f"id:{it.get('id', idx)}"
 
 
-def build_derangement_by_image(items, shift_seed=1):
-    """按图像内容 SHA256 分组构造严格异图置换（保證每道题换到的图与原图 SHA256 100% 不同）。"""
+def build_derangement_by_image(items, shift_seed=101):
+    """按图像内容指纹分组并随机重排图像组与组内样本，构造严格异图置换（保证每道题换到的图与原图 100% 不同）。"""
+    import random
     n = len(items)
     if n <= 1:
         return list(range(n)), 0
@@ -49,11 +50,15 @@ def build_derangement_by_image(items, shift_seed=1):
         groups[k].append(idx)
     if len(groups) <= 1:
         return list(range(n)), n
-    sorted_groups = sorted(groups.values(), key=lambda g: (-len(g), keys[g[0]]))
-    max_g = max(len(g) for g in sorted_groups)
+    rng = random.Random(shift_seed)
+    group_list = [list(g) for g in sorted(groups.values(), key=lambda g: keys[g[0]])]
+    for g in group_list:
+        rng.shuffle(g)
+    rng.shuffle(group_list)
+    max_g = max(len(g) for g in group_list)
     assert max_g * 2 <= n, f"最大同图组 {max_g} 超过总题数一半 {n}，无法构造零碰撞置换"
-    ordered = [idx for g in sorted_groups for idx in g]
-    shift = max_g + (shift_seed % max(1, n - 2 * max_g + 1))
+    ordered = [idx for g in group_list for idx in g]
+    shift = rng.randint(max_g, n - max_g)
     perm = [0] * n
     for pos, orig_idx in enumerate(ordered):
         perm[orig_idx] = ordered[(pos + shift) % n]
@@ -64,8 +69,8 @@ def build_derangement_by_image(items, shift_seed=1):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["tower", "tower_free", "proj", "proj_pool32", "proj_fastv32", "teacher"])
-    ap.add_argument("--ckpt")
+    ap.add_argument("--mode", choices=["tower", "tower_free", "proj", "proj_pool32", "proj_fastv32", "teacher", "base"])
+    ap.add_argument("--ckpt", default="")
     ap.add_argument("--name")
     ap.add_argument("--model", default=f"{bd.B}/zk/model/Qwen3-1.7B")
     ap.add_argument("--benches", default=",".join(bd.BENCHES))
@@ -74,6 +79,7 @@ def main():
     ap.add_argument("--max-pixels", type=int, default=392 * 392)
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--image-ctrl", choices=["none", "shuffle", "blank"], default="none")
+    ap.add_argument("--shuffle-seed", type=int, default=101, help="异图置换随机种子（不同种子随机重排图像组）")
     ap.add_argument("--force-gen", action="store_true", help="即使是选择题也走贪心自由生成，并统计 EOS 结束率/复读率/生成长度")
     ap.add_argument("--flags", default="", help="手动开结构开关，如 --multifreq,--hybrid（默认从 ckpt 的 args 读）")
     ap.add_argument("--prompt-alpha", type=float, default=None, help="Prompt 段旋转强度掩码（None=按 ckpt 配置）")
@@ -86,7 +92,7 @@ def main():
         return bs.selftest()
     if args.check_data:
         return bd.check_data(args.limit)
-    assert args.mode and args.ckpt and args.name, "需要 --mode --ckpt --name"
+    assert args.mode and args.name and (args.ckpt or args.mode in ("base", "teacher")), "需要 --mode --ckpt --name"
 
     import torch
     from bench_models import Runner
@@ -99,7 +105,7 @@ def main():
     res, pf = {}, open(f"{args.out_dir}/{args.name}.preds.jsonl", "w")
     for b in args.benches.split(","):
         items = bd.load_bench(b, args.limit)
-        perm, same_img_cnt = build_derangement_by_image(items) if args.image_ctrl == "shuffle" else (list(range(len(items))), 0)
+        perm, same_img_cnt = build_derangement_by_image(items, shift_seed=args.shuffle_seed) if args.image_ctrl == "shuffle" else (list(range(len(items))), 0)
         recs, tb = [], time.time()
         for i in range(0, len(items), args.bs):
             chunk = items[i : i + args.bs]
@@ -126,10 +132,15 @@ def main():
                     preds.append(p_one)
                     stats_list.append(st_one)
             assert len(preds) == len(chunk) and len(stats_list) == len(chunk), "预测或统计条数与输入 chunk 不一致"
-            for it, p, st in zip(chunk, preds, stats_list):
+            for idx_in_chunk, (it, p, st) in enumerate(zip(chunk, preds, stats_list)):
                 hit = int(bs.score_item(b, it, p))
-                recs.append({"id": it["id"], "cat": it["cat"], "pred": p, "hit": hit, "gold_idx": it.get("gold_idx", -1), **st})
-                pf.write(json.dumps({"bench": b, "id": it["id"], "pred": p, "gold": it["golds"], "hit": hit, **st},
+                ext_p = bs.extract_answer_text(p)
+                shuf_from_id = items[perm[i + idx_in_chunk]]["id"] if args.image_ctrl == "shuffle" else it["id"]
+                recs.append({"id": it["id"], "cat": it["cat"], "pred": p, "extracted_pred": ext_p, "hit": hit,
+                             "gold_idx": it.get("gold_idx", -1), "img_from_id": shuf_from_id, **st})
+                pf.write(json.dumps({"bench": b, "id": it["id"], "pred": p, "raw_pred": p, "extracted_pred": ext_p,
+                                     "gold": it["golds"], "hit": hit, "img_from_id": shuf_from_id,
+                                     "scorer_version": bs.SCORER_VERSION, **st},
                                     ensure_ascii=False) + "\n")
             if (i // args.bs) % 25 == 0:
                 print(f"[{b}] {len(recs)}/{len(items)} acc={sum(r['hit'] for r in recs) / len(recs):.3f} "
@@ -137,6 +148,8 @@ def main():
         res[b] = bs.aggregate(b, recs)
         if args.image_ctrl == "shuffle":
             res[b]["shuffle_same_image_count"] = same_img_cnt
+            res[b]["shuffle_seed"] = args.shuffle_seed
+            res[b]["shuffle_perm_sha1"] = hashlib.sha1(json.dumps(perm).encode()).hexdigest()
         if b == "hallusion" or any(r.get("pred") in ("Yes", "No") for r in recs):
             yn_recs = [r for r in recs if r.get("pred") in ("Yes", "No")]
             if yn_recs:
@@ -172,9 +185,10 @@ def main():
         print(f"== {b}: n={res[b]['n']} acc={res[b]['acc']:.4f} ci95={[round(x, 4) for x in res[b]['ci95']]} "
               f"empty={res[b]['empty_rate']:.2f}", flush=True)
     out = {"name": args.name, "mode": args.mode, "ckpt": args.ckpt, "model": args.model, "arch": run.arch,
+           "scorer_version": bs.SCORER_VERSION,
            "args": vars(args), "benches": res, "seconds": time.time() - t0,
            "peak_gib": torch.cuda.max_memory_allocated() / 1024 ** 3,
-           "note": "对齐训练格式的规则判分（选择题/判断题用候选对数似然，开放题贪心解码+防复读）；图片缩放到 ≤max_pixels"}
+           "note": "统一无禁词贪心生成协议与官方 relaxed 计分；图片缩放到 ≤max_pixels"}
     tmp = f"{args.out_dir}/{args.name}.json.tmp"
     json.dump(out, open(tmp, "w"), indent=1, ensure_ascii=False)
     os.replace(tmp, f"{args.out_dir}/{args.name}.json")

@@ -31,6 +31,123 @@ STUDENT_LAYERS = [6, 13, 20, 27]
 TEACHER_LAYERS = [8, 16, 24, 32]
 
 
+def get_image_key(i, data, paths=None, path_sha_cache=None):
+    """返回样本 i 的规范化图像内容指纹（优先 img_sha1 -> 文件 SHA1 -> 视觉特征 SHA1）。"""
+    import hashlib
+    if path_sha_cache is None:
+        path_sha_cache = {}
+    img_sha_list = data.get("img_sha1")
+    rid = data["ids"][i]
+    if img_sha_list and i < len(img_sha_list) and img_sha_list[i]:
+        return f"sha1:{img_sha_list[i]}"
+    if paths and rid in paths:
+        rp = os.path.realpath(paths[rid])
+        if rp not in path_sha_cache:
+            if os.path.exists(rp):
+                path_sha_cache[rp] = "file_sha1:" + hashlib.sha1(open(rp, "rb").read()).hexdigest()
+            else:
+                path_sha_cache[rp] = f"path:{os.path.normpath(paths[rid])}"
+        return path_sha_cache[rp]
+    if "vfeat" in data and len(data["vfeat"]) == len(data["ids"]):
+        vf = data["vfeat"][i]
+        h = hashlib.sha1()
+        h.update(str(tuple(vf.shape)).encode())
+        h.update(np.ascontiguousarray(vf[:4].numpy()).tobytes())
+        h.update(np.ascontiguousarray(vf[-4:].numpy()).tobytes())
+        return f"vfeat_sha1:{h.hexdigest()}"
+    return f"__sample__{rid}"
+
+
+def build_index_derangement(indices, data, paths=None, seed=20261112):
+    """对给定样本下标序列 indices 构造严格异图置换 shuf_indices（保证 100% 异图，same_cnt == 0）。"""
+    import hashlib
+    from collections import defaultdict
+    n = len(indices)
+    if n <= 1:
+        return list(indices), n, ""
+    cache = {}
+    keys = [get_image_key(i, data, paths, cache) for i in indices]
+    groups = defaultdict(list)
+    for pos, k in enumerate(keys):
+        groups[k].append(pos)
+    if len(groups) <= 1:
+        return list(indices), n, ""
+    rng = random.Random(seed)
+    group_list = [list(g) for g in sorted(groups.values(), key=lambda g: keys[g[0]])]
+    for g in group_list:
+        rng.shuffle(g)
+    rng.shuffle(group_list)
+    max_g = max(len(g) for g in group_list)
+    assert max_g * 2 <= n, f"验证集最大同图组 {max_g} 超过总样本数一半 {n}，无法构造零碰撞异图置换"
+    ordered = [pos for g in group_list for pos in g]
+    shift = rng.randint(max_g, n - max_g)
+    perm_pos = [0] * n
+    for p_idx, orig_pos in enumerate(ordered):
+        perm_pos[orig_pos] = ordered[(p_idx + shift) % n]
+    shuf_indices = [indices[perm_pos[pos]] for pos in range(n)]
+    same_cnt = sum(1 for pos in range(n) if keys[perm_pos[pos]] == keys[pos])
+    assert same_cnt == 0, f"内部异图置换仍存在 {same_cnt} 对同图样本！"
+    perm_sha1 = hashlib.sha1(json.dumps(shuf_indices).encode()).hexdigest()
+    return shuf_indices, same_cnt, perm_sha1
+
+
+def select_stratified_val_1000(val, data, n_target=1000, seed=0):
+    """按任务来源前缀从验证集分层抽取固定 1000 题，返回 (selected_indices, sha1)。"""
+    import hashlib
+    from collections import defaultdict
+    if len(val) <= n_target:
+        sha = hashlib.sha1(json.dumps(list(val)).encode()).hexdigest()
+        return list(val), sha
+    by_src = defaultdict(list)
+    for i in val:
+        rid = str(data["ids"][i])
+        src = rid.split(":")[0].split("_")[0]
+        by_src[src].append(i)
+    rng = random.Random(seed)
+    srcs = sorted(by_src.keys())
+    for s in srcs:
+        by_src[s] = list(by_src[s])
+        rng.shuffle(by_src[s])
+    total = len(val)
+    picked = []
+    rem = []
+    for s in srcs:
+        bucket = by_src[s]
+        k = max(1, int(round(len(bucket) * n_target / total)))
+        k = min(k, len(bucket))
+        picked.extend(bucket[:k])
+        rem.extend(bucket[k:])
+    rng.shuffle(rem)
+    if len(picked) < n_target:
+        picked.extend(rem[: n_target - len(picked)])
+    elif len(picked) > n_target:
+        picked = picked[:n_target]
+    sha = hashlib.sha1(json.dumps(picked).encode()).hexdigest()
+    return picked, sha
+
+
+def build_inbatch_diff_image_perm(batch, data, paths=None):
+    """为 batch 内每个样本寻找严格不同图像的负例下标；返回 (perm_tensor, valid_mask_tensor)。"""
+    n = len(batch)
+    cache = {}
+    keys = [get_image_key(i, data, paths, cache) for i in batch]
+    perm, valid = [], []
+    for j in range(n):
+        found = -1
+        for step in range(1, n):
+            cand = (j + step) % n
+            if keys[cand] != keys[j]:
+                found = cand
+                break
+        if found >= 0:
+            perm.append(found)
+            valid.append(1.0)
+        else:
+            perm.append(j)
+            valid.append(0.0)
+    return perm, valid
+
+
 def split_train_val_by_image(data, paths=None, n_val=0, seed=0):
     """按图像内容哈希（优先 img_sha1 -> 真实图片文件字节 SHA1 -> 视觉特征 SHA1）分组切分，确保同图绝不跨 train/val。"""
     import hashlib
@@ -38,28 +155,8 @@ def split_train_val_by_image(data, paths=None, n_val=0, seed=0):
     n_val = n_val or max(64, n // 10)
     groups = {}
     path_sha_cache = {}
-    img_sha_list = data.get("img_sha1")
-    has_vfeat = "vfeat" in data and len(data["vfeat"]) == n
-    for i, rid in enumerate(data["ids"]):
-        if img_sha_list and i < len(img_sha_list) and img_sha_list[i]:
-            key = f"sha1:{img_sha_list[i]}"
-        elif paths and rid in paths:
-            rp = os.path.realpath(paths[rid])
-            if rp not in path_sha_cache:
-                if os.path.exists(rp):
-                    path_sha_cache[rp] = "file_sha1:" + hashlib.sha1(open(rp, "rb").read()).hexdigest()
-                else:
-                    path_sha_cache[rp] = f"path:{os.path.normpath(paths[rid])}"
-            key = path_sha_cache[rp]
-        elif has_vfeat:
-            vf = data["vfeat"][i]
-            h = hashlib.sha1()
-            h.update(str(tuple(vf.shape)).encode())
-            h.update(np.ascontiguousarray(vf[:4].numpy()).tobytes())
-            h.update(np.ascontiguousarray(vf[-4:].numpy()).tobytes())
-            key = f"vfeat_sha1:{h.hexdigest()}"
-        else:
-            key = f"__sample__{rid}"
+    for i in range(n):
+        key = get_image_key(i, data, paths, path_sha_cache)
         groups.setdefault(key, []).append(i)
     keys = sorted(groups)
     random.Random(0).shuffle(keys)
@@ -74,9 +171,11 @@ def split_train_val_by_image(data, paths=None, n_val=0, seed=0):
     assert train and val, "按图切分后 train 或 val 为空"
     assert not (train_groups & val_groups), "train/val 存在共享图片组"
     random.Random(seed).shuffle(train)
+    split_sha1 = hashlib.sha1(json.dumps({"val": val, "n_train": len(train)}).encode()).hexdigest()
     return train, val, {"train_rows": len(train), "val_rows": len(val),
                         "train_groups": len(train_groups), "val_groups": len(val_groups),
-                        "group_overlap": len(train_groups & val_groups)}
+                        "group_overlap": len(train_groups & val_groups),
+                        "split_sha1": split_sha1}
 
 
 def topk_conditional_kl(student_logits, topk_ids, topk_vals, mask, temperature=2.0):
@@ -135,20 +234,25 @@ def collate(batch_idx, data, tok, max_seq, need_teacher):
 
 
 @torch.no_grad()
-def eval_losses(model, registry, tok, val, data, max_seq, dev, bs=8, n_batches=8):
+def eval_losses(model, registry, tok, val, data, max_seq, dev, bs=8, n_batches=8, shuf_seed=20261112):
     model.eval()
     tot = {"correct": 0.0, "shuffled": 0.0, "no_image": 0.0}
     cnt = 0
+    eval_slice = list(val[: n_batches * bs])
+    shuf_slice, same_cnt, perm_sha1 = build_index_derangement(eval_slice, data, seed=shuf_seed)
+    assert same_cnt == 0, f"eval_losses 异图置换存在 {same_cnt} 对同图！"
     for bi in range(n_batches):
-        batch = val[bi * bs : (bi + 1) * bs]
+        batch = eval_slice[bi * bs : (bi + 1) * bs]
+        shuf_batch = shuf_slice[bi * bs : (bi + 1) * bs]
         if len(batch) < 2:
             break
         ids, mask, labels, vis, vmask, *_ = collate(batch, data, tok, max_seq, False)
+        _, _, _, vis_shuf, vmask_shuf, *_ = collate(shuf_batch, data, tok, max_seq, False)
         ids, mask, labels = ids.to(dev), mask.to(dev), labels.to(dev)
         vis, vmask = vis.to(dev), vmask.to(dev)
+        vis_shuf, vmask_shuf = vis_shuf.to(dev), vmask_shuf.to(dev)
         a0_list = [data["a_rel_start"][i] for i in batch]
-        perm = torch.tensor([(i + 1) % len(batch) for i in range(len(batch))])
-        for key, v, vm in (("correct", vis, vmask), ("shuffled", vis[perm], vmask[perm]),
+        for key, v, vm in (("correct", vis, vmask), ("shuffled", vis_shuf, vmask_shuf),
                            ("no_image", None, None)):
             if v is None:
                 lg = model(input_ids=ids, attention_mask=mask).logits.float()
@@ -159,7 +263,10 @@ def eval_losses(model, registry, tok, val, data, max_seq, dev, bs=8, n_batches=8
                                         labels[:, 1:].reshape(-1)).item()
         cnt += 1
     model.train()
-    return {k: v / max(cnt, 1) for k, v in tot.items()}
+    out = {k: v / max(cnt, 1) for k, v in tot.items()}
+    out["shuf_same_image_count"] = same_cnt
+    out["shuf_perm_sha1"] = perm_sha1
+    return out
 
 
 def _norm(s):
@@ -282,6 +389,7 @@ def main():
     ap.add_argument("--hyb-bound", type=float, default=0.0, help="hybrid 残差相对范数上限（>0 防长序列激活爆炸）")
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
+    ap.add_argument("--no-rot", action="store_true", help="A1 消融：旋转恒等映射 R=I，仅保留视觉 cross-attention")
     ap.add_argument("--query-dim", type=int, default=256)
     ap.add_argument("--bs", type=int, default=8)
     ap.add_argument("--seq", type=int, default=160)
@@ -296,7 +404,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--student-layers", default="6,13,20,27")
-    ap.add_argument("--em-n", type=int, default=60)
+    ap.add_argument("--em-n", type=int, default=1000)
     ap.add_argument("--test-data", default="")
     ap.add_argument("--test-em-n", type=int, default=150)
     ap.add_argument("--init-ckpt", default="", help="可选：从已有 VRMG 权重热启动继续微调")
@@ -322,7 +430,7 @@ def main():
     vrmgs, registry = attach_rotation(model, layers, block_size=args.block, multifreq=args.multifreq, tokrot=args.tokrot, hybrid=args.hybrid,
                                       visual_dim=data["vfeat"][0].shape[-1], query_dim=args.query_dim,
                                       prompt_alpha=args.prompt_alpha, hyb_bound=args.hyb_bound,
-                                      qcond=args.qcond, direct_hyb=args.direct_hyb)
+                                      qcond=args.qcond, direct_hyb=args.direct_hyb, no_rot=args.no_rot)
     if args.init_ckpt and os.path.exists(args.init_ckpt):
         ick = torch.load(args.init_ckpt, map_location=dev)
         for m, sd in zip(vrmgs, ick["state"]):
@@ -373,26 +481,28 @@ def main():
         loss, kd_v, rel_v, gnd_v = ce, 0.0, 0.0, 0.0
 
         if args.gnd_weight > 0.0 and len(batch) >= 2:
-            perm = torch.tensor([(j + 1) % len(batch) for j in range(len(batch))], device=dev)
-            # 错图分支保持梯度开启（不加 no_grad），同时对真图产生正向拉力、对错图产生反向推力
-            with rotation_context_with(registry, vis[perm], vmask[perm], ans_start=a0_list, text_mask=mask):
-                out_shuf = model(input_ids=ids, attention_mask=mask)
-            lg_shuf = out_shuf.logits.float()[:, :-1]
-            # 跳过 Qwen3 数字答案的前导纯空格 token 220 (' ')，直接监督第一个实质内容/数字 token
-            p0_list = []
-            for j, i in enumerate(batch):
-                a0 = data["a_rel_start"][i]
-                if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
-                    a0 = a0 + 1
-                p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
-            p0 = torch.tensor(p0_list, device=dev)
-            b_idx = torch.arange(len(batch), device=dev)
-            y0 = ids[b_idx, p0 + 1]
-            nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
-            nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
-            gnd = F.relu(args.gnd_margin - (nll_shuf - nll_real)).mean()
-            loss = loss + args.gnd_weight * gnd
-            gnd_v = gnd.item()
+            perm_list, valid_list = build_inbatch_diff_image_perm(batch, data)
+            if any(v > 0 for v in valid_list):
+                perm = torch.tensor(perm_list, device=dev)
+                valid_m = torch.tensor(valid_list, device=dev)
+                with rotation_context_with(registry, vis[perm], vmask[perm], ans_start=a0_list, text_mask=mask):
+                    out_shuf = model(input_ids=ids, attention_mask=mask)
+                lg_shuf = out_shuf.logits.float()[:, :-1]
+                p0_list = []
+                for j, i in enumerate(batch):
+                    a0 = data["a_rel_start"][i]
+                    if a0 + 1 < ids.shape[1] and int(ids[j, a0].item()) == 220:
+                        a0 = a0 + 1
+                    p0_list.append(min(max(0, a0 - 1), lg.shape[1] - 1))
+                p0 = torch.tensor(p0_list, device=dev)
+                b_idx = torch.arange(len(batch), device=dev)
+                y0 = ids[b_idx, p0 + 1]
+                nll_real = F.cross_entropy(lg[b_idx, p0], y0, reduction="none")
+                nll_shuf = F.cross_entropy(lg_shuf[b_idx, p0], y0, reduction="none")
+                gnd_raw = F.relu(args.gnd_margin - (nll_shuf - nll_real))
+                gnd = (gnd_raw * valid_m).sum() / valid_m.sum().clamp(min=1.0)
+                loss = loss + args.gnd_weight * gnd
+                gnd_v = gnd.item()
 
         if args.arm in ("kd", "rel"):
             k_ids_g, k_vals_g, k_mask_g = k_ids.to(dev), k_vals.to(dev), k_mask.to(dev)
@@ -428,18 +538,21 @@ def main():
                 f"{(time.time()-t0)/step:.2f}s/it")
         if step % args.eval_every == 0:
             ev = eval_losses(model, registry, tok, val, data, args.seq, dev)
-            acc = eval_accuracy(model, registry, tok, val, data, dev, n=args.em_n)
-            log(f"  eval@{step}: " + " ".join(f"{k}={v:.4f}" for k, v in ev.items())
+            acc = eval_accuracy(model, registry, tok, val, data, dev, n=min(100, args.em_n))
+            log(f"  eval@{step}: correct={ev['correct']:.4f} shuffled={ev['shuffled']:.4f} no_image={ev['no_image']:.4f}"
                 + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f} "
                   f"peak={torch.cuda.max_memory_allocated()/1024**3:.1f}GiB")
 
+    val_em_sub, val_1000_sha1 = select_stratified_val_1000(val, data, n_target=args.em_n, seed=0)
     ev = eval_losses(model, registry, tok, val, data, args.seq, dev, n_batches=len(val) // 8 + 1)
-    acc = eval_accuracy(model, registry, tok, val, data, dev, n=args.em_n)
+    acc = eval_accuracy(model, registry, tok, val_em_sub, data, dev, n=len(val_em_sub))
     v_first, v_full = eval_tf_acc(model, registry, tok, data, val, dev)
-    log(f"FINAL {args.arm}: " + " ".join(f"{k}={v:.4f}" for k, v in ev.items())
-        + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f} tf_first={v_first:.3f} tf_full={v_full:.3f}")
-    result = {"args": vars(args), "val": {**ev, "gap": ev["shuffled"] - ev["correct"], "em": acc,
-                                          "tf_first": v_first, "tf_full": v_full},
+    log(f"FINAL {args.arm}: correct={ev['correct']:.4f} shuffled={ev['shuffled']:.4f} no_image={ev['no_image']:.4f}"
+        + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f}(n={len(val_em_sub)}) tf_first={v_first:.3f} tf_full={v_full:.3f}")
+    result = {"args": vars(args), "split_info": split_info,
+              "trainable_params": int(n_train),
+              "val": {**ev, "gap": ev["shuffled"] - ev["correct"], "em": acc, "em_n": len(val_em_sub),
+                      "val_em_sha1": val_1000_sha1, "tf_first": v_first, "tf_full": v_full},
               "train_steps": args.steps, "train_seconds": time.time() - t0,
               "peak_gib": torch.cuda.max_memory_allocated() / 1024**3}
 
