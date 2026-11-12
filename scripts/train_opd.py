@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 import train_final as tf  # noqa: E402
+from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -99,14 +100,13 @@ def extract_answer(text):
 
 
 @torch.no_grad()
-def greedy_em(model, registry, tok, data, idx, dev, n=100, max_new=32, boxed=False):
-    """学生自己贪婪生成整段答案，与金标比对（归一化沿用 train_final._norm）。
-
-    同时统计「自己停下来」的比例和平均生成长度，用来区分「答错」与「停不下来」。
-    """
+def greedy_em(model, registry, tok, data, idx, dev, n=1000, max_new=24, boxed=False):
+    """统一验证集贪婪生成评测协议（与 train_final.eval_greedy_stats / Tower-Free 完全一致）。"""
+    if not boxed:
+        return tf.eval_greedy_stats(model, registry, tok, idx, data, dev, n=n, max_new=max_new, bs=8)
     model.eval()
     stops = set(stop_ids(tok))
-    hit = stopped = tot_len = cnt = 0
+    hit = stopped = tot_len = rep3_cnt = cnt = 0
     for i in idx[:n]:
         ids = tok(data["prompts"][i])["input_ids"]
         vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
@@ -118,15 +118,15 @@ def greedy_em(model, registry, tok, data, idx, dev, n=100, max_new=32, boxed=Fal
         gen = out[0, len(ids):]
         real = cut_at_stop(gen, stops)
         pred = tok.decode(real, skip_special_tokens=True)
-        if boxed:
-            hit += int(tf._norm(extract_answer(pred)) == tf._norm(extract_answer(data["answers"][i])))
-        else:
-            hit += int(tf._norm(pred) == tf._norm(data["answers"][i]))
+        hit += int(tf._norm(extract_answer(pred)) == tf._norm(extract_answer(data["answers"][i])))
         stopped += int(len(real) < len(gen))
         tot_len += len(real)
+        ng3 = [tuple(real[m : m + 3]) for m in range(max(0, len(real) - 2))]
+        rep3_cnt += int(len(ng3) >= 2 and len(set(ng3)) < len(ng3))
         cnt += 1
     model.train()
-    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1), "mean_len": tot_len / max(cnt, 1)}
+    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1),
+            "mean_len": tot_len / max(cnt, 1), "rep3_rate": rep3_cnt / max(cnt, 1), "em_n": cnt}
 
 
 def evaluate(model, registry, tok, data, idx, dev, n_tf, n_em, max_new, boxed=False):
@@ -185,7 +185,7 @@ def main():
     ap.add_argument("--steps", type=int, default=600)
     ap.add_argument("--bs", type=int, default=4)
     ap.add_argument("--accum", type=int, default=1, help="梯度累积：每个优化步用 accum 个 bs 大小的微批")
-    ap.add_argument("--max-new", type=int, default=32)
+    ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--boxed", action="store_true", help="CoT 模式：抽 \boxed{} 评准确率，老师 prompt 要求逐步推导")
     ap.add_argument("--prompt-alpha", type=float, default=1.0, help="Prompt 段旋转强度掩码（<1 保留原 LLM 读题能力）")
     ap.add_argument("--hyb-bound", type=float, default=0.0, help="hybrid 残差相对范数上限（>0 防长序列激活爆炸）")
@@ -201,9 +201,9 @@ def main():
     ap.add_argument("--ce-weight", type=float, default=0.2, help="金标 prompt+答案+EOS 的 CE 锚点权重，0 关闭")
     ap.add_argument("--seq", type=int, default=160, help="金标 CE 的序列长度（同 P1）")
     ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--tune-backbone", action="store_true", help="OPD 同时更新学生 LLM 主干；默认仍只更新 VRMG")
+    ap.add_argument("--tune-backbone", action="store_true", help="已禁用：当前主线强制要求原始 LLM 全程冻结")
     ap.add_argument("--backbone-lr", type=float, default=1e-5)
-    ap.add_argument("--n-eval", type=int, default=100, help="val 上评测的样本数（上限为 val 大小）")
+    ap.add_argument("--n-eval", type=int, default=1000, help="val 上评测的样本数（分层抽取 1000 题）")
     ap.add_argument("--n-test", type=int, default=0, help="test 上评测的样本数，0=全部")
     ap.add_argument("--eval-every", type=int, default=0, help="训练中途评测间隔，0=steps//3（至少 100）")
     ap.add_argument("--log-every", type=int, default=20)
@@ -211,6 +211,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if args.tune_backbone:
+        raise ValueError("当前冻结主线严禁启用 --tune-backbone！原始 LLM 必须全程 100% 冻结。")
     torch.manual_seed(args.seed)
     dev = "cuda"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -228,6 +230,7 @@ def main():
     train = [i for i in train if data["ids"][i] in paths]
     val = [i for i in val if data["ids"][i] in paths]
     assert train and val, "按图切分后可用 train/val 为空"
+    val_em_1000, val_1000_sha1 = tf.select_stratified_val_1000(val, data, n_target=args.n_eval, seed=0)
     tdata, tidx = None, []
     if args.test_data:
         tdata = tf.load_data(args.test_data)
@@ -265,12 +268,8 @@ def main():
     vparams = [p for m in vrmgs for p in m.parameters()]
     for p in vparams:
         p.requires_grad_(True)
-    bparams = []
-    if args.tune_backbone:
-        bparams = list(model.parameters())
-        for p in bparams:
-            p.requires_grad_(True)
-    all_params = vparams + [p for p in bparams if all(p is not q for q in vparams)]
+    all_params = list(vparams)
+    pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
 
     teacher = None
     if not args.eval_only:
@@ -279,12 +278,12 @@ def main():
         for p in teacher.parameters():
             p.requires_grad_(False)
     log(f"=== OPD steps={args.steps} bs={args.bs} max_new={args.max_new} min_new={args.min_new} lr={args.lr} "
-        f"tune_backbone={args.tune_backbone} split={split_info} ce_w={args.ce_weight} train={len(train)} val={len(val)} test={len(tidx)} ===")
+        f"split={split_info} ce_w={args.ce_weight} train={len(train)} val={len(val)}(em_n={len(val_em_1000)}) test={len(tidx)} ===")
 
     def run_eval(tag, with_test=True, n_val_tf=None, n_val_em=None):
         out = {}
-        ev = evaluate(model, registry, tok, data, val, dev, n_val_tf or args.n_eval, n_val_em or args.n_eval,
-                      args.max_new, args.boxed)
+        ev = evaluate(model, registry, tok, data, val_em_1000, dev, n_val_tf or min(150, len(val_em_1000)),
+                      n_val_em or len(val_em_1000), args.max_new, args.boxed)
         log(f"{tag} val: {fmt(ev)}")
         out["val"] = ev
         if with_test and tdata is not None:
@@ -293,25 +292,26 @@ def main():
             out["test"] = et
         return out
 
-    def save(res):
+    def save(res, manifest=None):
+        if manifest is not None:
+            res["manifest"] = manifest
         with open(args.out + ".json", "w") as f:
             json.dump(res, f, indent=1, ensure_ascii=False)
         torch.save({"state": [m.state_dict() for m in vrmgs], "args": a1,
-                    "backbone": model.state_dict() if args.tune_backbone else None}, args.out + ".pt")
+                    "manifest": manifest, "backbone": None}, args.out + ".pt")
 
-    result = {"args": vars(args), "mid_eval": []}
+    result = {"args": vars(args), "split_info": split_info, "val_em_sha1": val_1000_sha1, "mid_eval": []}
     init = run_eval("INIT")
     result["init_eval"] = init["val"]
     if "test" in init:
         result["init_test"] = init["test"]
     if args.eval_only:
         result["eval"], result["test"] = init["val"], init.get("test")
-        save(result)
+        save(result, build_run_manifest("tower_opd_eval", vars(args), split_info))
         log("OPD_DONE"); return
 
-    opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr}] +
-                            ([{"params": [p for p in bparams if all(p is not q for q in vparams)], "lr": args.backbone_lr}]
-                             if bparams else []), weight_decay=0.01)
+    opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr}], weight_decay=0.01)
+    verify_frozen_backbone_and_optimizer(model, opt, all_params)
     eval_every = args.eval_every or max(args.steps // 3, 100)
     t0, hist, gn = time.time(), [], torch.zeros(())
     pad_id = tok.pad_token_id
@@ -394,14 +394,19 @@ def main():
             ev = run_eval(f"  mid@{step}", with_test=False, n_val_tf=60, n_val_em=40)
             result["mid_eval"].append({"step": step, **ev["val"]})
 
+    frozen_info = verify_frozen_backbone_and_optimizer(model, opt, all_params, pre_hashes)
     result["train_seconds"] = time.time() - t0
     fin = run_eval("FINAL")
     result["eval"] = fin["val"]
     if "test" in fin:
         result["test"] = fin["test"]
     result["loss_tail"] = hist[-200:]
+    result["frozen_check"] = frozen_info
     result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024 ** 3
-    save(result)
+    manifest = build_run_manifest("tower_opd_train", vars(args), split_info,
+                                  extra={"frozen_check": frozen_info, "val_em_sha1": val_1000_sha1,
+                                         "backbone_sha1_before": pre_bb_sha1})
+    save(result, manifest)
     for part, before in (("val", result["init_eval"]), ("test", result.get("init_test"))):
         after = fin.get(part)
         if before and after:

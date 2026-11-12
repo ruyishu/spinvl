@@ -30,56 +30,12 @@ import train_final as tf  # noqa: E402
 import train_joint as tj  # noqa: E402
 import train_opd as topd  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
+from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
 
-
-@torch.no_grad()
-def front_greedy_em(model, front, registry, tok, data, idx, paths, ip, dev, n=1000, max_new=24, bs=8):
-    """无外部视觉塔模型自己看原图 → PatchFront → VRMG 批量贪婪生成整段答案，算 EM / 停止率 / 长度 / 3-gram 复读率。"""
-    model.eval(); front.eval()
-    stops = topd.stop_ids(tok)
-    stop_set = set(stops)
-    pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
-    eval_idx = list(idx[:n])
-    hit = stopped = tot_len = rep3_cnt = cnt = 0
-    for s0 in range(0, len(eval_idx), bs):
-        chunk = eval_idx[s0 : s0 + bs]
-        pids = [tok(data["prompts"][i])["input_ids"] for i in chunk]
-        pad = max(len(x) for x in pids)
-        in_ids = torch.tensor([[pad_id] * (pad - len(x)) + x for x in pids], device=dev)
-        attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
-        pvs, grids, lens = [], [], []
-        for i in chunk:
-            img = Image.open(paths[data["ids"][i]]).convert("RGB")
-            o = ip(images=[img], return_tensors="pt")
-            pvs.append(o["pixel_values"].to(torch.float16))
-            grids.append(o["image_grid_thw"][0])
-            lens.append(o["pixel_values"].shape[0])
-        pv = torch.zeros(len(pvs), max(lens), pvs[0].shape[1], dtype=torch.float16, device=dev)
-        for j, p in enumerate(pvs):
-            pv[j, : lens[j]] = p.to(dev)
-        v_hat, cl = front(pv, torch.stack(grids), lens)
-        vis, vm = tj.pad_vis([v_hat[j, : cl[j]].float() for j in range(len(cl))], dev)
-        with rotation_context_with(registry, vis, vm, text_mask=attn):
-            out = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=max_new,
-                                 do_sample=False, pad_token_id=pad_id, eos_token_id=stops)
-        for j, i in enumerate(chunk):
-            gen = out[j, pad:]
-            raw_ids = [int(x) for x in gen.tolist()]
-            has_eos = any(t in stop_set for t in raw_ids)
-            real = topd.cut_at_stop(gen, stop_set)
-            pred = tok.decode(real, skip_special_tokens=True)
-            hit += int(tf._norm(pred) == tf._norm(data["answers"][i]))
-            stopped += int(has_eos)
-            tot_len += len(real)
-            ng3 = [tuple(real[m : m + 3]) for m in range(max(0, len(real) - 2))]
-            rep3_cnt += int(len(ng3) >= 2 and len(set(ng3)) < len(ng3))
-            cnt += 1
-    front.train(); model.train()
-    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1),
-            "mean_len": tot_len / max(cnt, 1), "rep3_rate": rep3_cnt / max(cnt, 1), "em_n": cnt}
+front_greedy_em = tj.front_greedy_em
 
 
 def full_front_eval(model, front, registry, tok, data, val_loss_idx, val_em_idx, paths, ip, dev, seq, n_acc=150, n_em=1000, max_new=24):
@@ -118,7 +74,7 @@ def main():
     ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
     ap.add_argument("--lr-vrmg", type=float, default=2e-5)
     ap.add_argument("--lr-front", type=float, default=1e-5)
-    ap.add_argument("--tune-backbone", action="store_true", help="OPD 同时更新学生 LLM 主干")
+    ap.add_argument("--tune-backbone", action="store_true", help="已禁用：当前主线强制要求原始 LLM 全程冻结")
     ap.add_argument("--backbone-lr", type=float, default=1e-5)
     ap.add_argument("--n-eval", type=int, default=600)
     ap.add_argument("--n-acc", type=int, default=150)
@@ -126,6 +82,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if args.tune_backbone:
+        raise ValueError("当前冻结主线严禁启用 --tune-backbone！原始 LLM 必须全程 100% 冻结。")
     torch.manual_seed(args.seed)
     dev = "cuda"
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -134,14 +92,7 @@ def main():
     def log(m):
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
-    paths = {}
-    for s in args.source:
-        paths.update(imgdata.parse_source(s)[1])
-    data = tf.load_data(args.data)
-    n = len(data["ids"])
-    train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
-    val = [i for i in val if data["ids"][i] in paths]
-    train = [i for i in train if data["ids"][i] in paths]
+    data, paths, train, val, split_info = tj.prepare_joint_split(args.data, args.source, seed=args.seed)
     assert train and val, "按图切分后可用 train/val 为空"
     val_eval = val[: args.n_eval]
     val_em_1000, val_1000_sha1 = tf.select_stratified_val_1000(val, data, n_target=args.n_em, seed=0)
@@ -191,12 +142,8 @@ def main():
     freeze_all_but(model, [])
     for p in fparams + vparams:
         p.requires_grad_(True)
-    bparams = []
-    if args.tune_backbone:
-        bparams = list(model.parameters())
-        for p in bparams:
-            p.requires_grad_(True)
-    backbone_params = [p for p in bparams if all(p is not q for q in fparams + vparams)]
+    all_params = fparams + vparams
+    pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
 
     need_teacher = (args.kl_mode != "none" and args.kl_weight > 0.0)
     teacher = None
@@ -217,16 +164,10 @@ def main():
     log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items() if isinstance(v, (int, float))))
 
     opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr_vrmg},
-                             {"params": fparams, "lr": args.lr_front}] +
-                            ([{"params": backbone_params, "lr": args.backbone_lr}] if backbone_params else []),
+                             {"params": fparams, "lr": args.lr_front}],
                             weight_decay=0.01)
-    if not args.tune_backbone:
-        opt_ids = {id(p) for g in opt.param_groups for p in g["params"]}
-        allowed_ids = {id(p) for p in fparams + vparams}
-        assert opt_ids == allowed_ids, "Optimizer 包含非白名单参数！"
-        assert all(not p.requires_grad for p in model.parameters()), "冻结模式下原始 LLM 存在 requires_grad=True 参数！"
+    verify_frozen_backbone_and_optimizer(model, opt, all_params)
     base_lrs = [g["lr"] for g in opt.param_groups]
-    all_params = fparams + vparams + backbone_params
     collate_fn = tj.make_collate(data, paths, ip, tok, args.seq, False)
     t0, hist = time.time(), []
     eos_id = tok.eos_token_id
@@ -337,12 +278,18 @@ def main():
             log(f"step {step} loss={sum(x[0] for x in h)/len(h):.4f} kl_used={sum(x[1] for x in h)/len(h):.1f} "
                 f"len={sum(x[2] for x in h)/len(h):.1f}tok gn={float(gn):.2f} {(time.time()-t0)/step:.2f}s/it")
 
+    frozen_info = verify_frozen_backbone_and_optimizer(model, opt, all_params, pre_hashes)
     result["train_seconds"] = time.time() - t0
     fin_ev = full_front_eval(model, front, registry, tok, data, val_eval, val_em_1000, paths, ip, dev, args.seq,
                              n_acc=args.n_acc, n_em=len(val_em_1000), max_new=args.max_new)
     result["eval"] = fin_ev
     result["delta"] = {k: fin_ev[k] - init_ev[k] for k in fin_ev if isinstance(fin_ev[k], float)}
     result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024 ** 3
+    manifest = build_run_manifest("joint_opd_train", vars(args), split_info,
+                                  extra={"frozen_check": frozen_info, "val_em_sha1": val_1000_sha1,
+                                         "backbone_sha1_before": pre_bb_sha1})
+    result["manifest"] = manifest
+    result["frozen_check"] = frozen_info
     log("FINAL[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in fin_ev.items() if isinstance(v, (int, float))))
     log("DELTA[after - before]: " + " ".join(f"{k}={v:+.4f}" for k, v in result["delta"].items()))
     save_args = dict(ja)
@@ -352,7 +299,7 @@ def main():
     save_args["seed"] = args.seed
     json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
     torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": save_args,
-                "backbone": model.state_dict() if args.tune_backbone else None}, args.out + ".pt")
+                "manifest": manifest, "backbone": None}, args.out + ".pt")
     log("JOINT_OPD_DONE")
 
 

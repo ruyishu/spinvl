@@ -27,10 +27,72 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 import train_final as tf  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
+from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
 STUDENT_LAYERS, TEACHER_LAYERS = tf.STUDENT_LAYERS, tf.TEACHER_LAYERS
+
+
+def prepare_joint_split(data_spec, source_specs, seed=0):
+    """联合训练/OPD 的数据加载与图像级切分入口（供训练与门禁脚本直接调用验证跨阶段一致性）。"""
+    paths = {}
+    for s in source_specs:
+        paths.update(imgdata.parse_source(s)[1])
+    data = tf.load_data(data_spec)
+    train_raw, val_raw, split_info = tf.split_train_val_by_image(data, paths, seed=seed)
+    train = [i for i in train_raw if data["ids"][i] in paths and data["vlen"][i] > 0]
+    val = [i for i in val_raw if data["ids"][i] in paths and data["vlen"][i] > 0]
+    return data, paths, train, val, split_info
+
+
+@torch.no_grad()
+def front_greedy_em(model, front, registry, tok, data, idx, paths, ip, dev, n=1000, max_new=24, bs=8):
+    """无外部视觉塔模型统一验证集贪婪生成评测协议（max_new=24, bs=8, 左填充, stop_ids 截断）。"""
+    model.eval(); front.eval()
+    orig_side = tok.padding_side
+    stops = tf._stop_ids(tok)
+    stop_set = set(stops)
+    pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
+    eval_idx = list(idx[:n])
+    hit = stopped = tot_len = rep3_cnt = cnt = 0
+    for s0 in range(0, len(eval_idx), bs):
+        chunk = eval_idx[s0 : s0 + bs]
+        pids = [tok(data["prompts"][i])["input_ids"] for i in chunk]
+        pad = max(len(x) for x in pids)
+        in_ids = torch.tensor([[pad_id] * (pad - len(x)) + x for x in pids], device=dev)
+        attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
+        pvs, grids, lens = [], [], []
+        for i in chunk:
+            img = Image.open(paths[data["ids"][i]]).convert("RGB")
+            o = ip(images=[img], return_tensors="pt")
+            pvs.append(o["pixel_values"].to(torch.float16))
+            grids.append(o["image_grid_thw"][0])
+            lens.append(o["pixel_values"].shape[0])
+        pv = torch.zeros(len(pvs), max(lens), pvs[0].shape[1], dtype=torch.float16, device=dev)
+        for j, p in enumerate(pvs):
+            pv[j, : lens[j]] = p.to(dev)
+        v_hat, cl = front(pv, torch.stack(grids), lens)
+        vis, vm = pad_vis([v_hat[j, : cl[j]].float() for j in range(len(cl))], dev)
+        with rotation_context_with(registry, vis, vm, text_mask=attn):
+            out = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=max_new,
+                                 do_sample=False, pad_token_id=pad_id, eos_token_id=stops)
+        for j, i in enumerate(chunk):
+            gen = out[j, pad:]
+            raw_ids = [int(x) for x in gen.tolist()]
+            has_eos = any(t in stop_set for t in raw_ids)
+            real = tf._cut_at_stop(gen, stop_set)
+            pred = tok.decode(real, skip_special_tokens=True)
+            hit += int(tf._norm(pred) == tf._norm(data["answers"][i]))
+            stopped += int(has_eos)
+            tot_len += len(real)
+            ng3 = [tuple(real[m : m + 3]) for m in range(max(0, len(real) - 2))]
+            rep3_cnt += int(len(ng3) >= 2 and len(set(ng3)) < len(ng3))
+            cnt += 1
+    tok.padding_side = orig_side
+    front.train(); model.train()
+    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1),
+            "mean_len": tot_len / max(cnt, 1), "rep3_rate": rep3_cnt / max(cnt, 1), "em_n": cnt}
 
 
 def make_collate(data, paths, ip, tok, seq, need_teacher):
@@ -156,6 +218,7 @@ def main():
     ap.add_argument("--gnd-margin", type=float, default=0.75, help="首内容 token 错图与真图 NLL 边际阈值")
     ap.add_argument("--arm", choices=["ce", "kd", "rel"], default="rel")
     ap.add_argument("--n-eval", type=int, default=600)
+    ap.add_argument("--n-em", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--student-layers", default="6,13,20,27")
     ap.add_argument("--workers", type=int, default=3)
@@ -169,15 +232,9 @@ def main():
     def log(m):
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
-    paths = {}
-    for s in args.source:
-        paths.update(imgdata.parse_source(s)[1])
-    data = tf.load_data(args.data)
-    n = len(data["ids"])
-    train, val, split_info = tf.split_train_val_by_image(data, paths, seed=args.seed)
+    data, paths, train, val, split_info = prepare_joint_split(args.data, args.source, seed=args.seed)
     val_eval = val[: args.n_eval]
-    train = [i for i in train if data["ids"][i] in paths]
-    val = [i for i in val if data["ids"][i] in paths]
+    val_em_1000, val_1000_sha1 = tf.select_stratified_val_1000(val, data, n_target=args.n_em, seed=0)
     assert train and val, "按图切分后可用 train/val 为空"
 
     ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
@@ -216,6 +273,9 @@ def main():
                                "joint_trainable_total": int(n_front_tot + n_vrmg)}}
     t0 = time.time()
 
+    pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
+    opt = None
+    all_params = []
     if args.stage == "joint":
         fparams = front.trainable_params()
         vparams = [p for m in vrmgs for p in m.parameters()]
@@ -231,6 +291,8 @@ def main():
         if rel_head is not None:
             groups.append({"params": list(rel_head.parameters()), "lr": args.lr_vrmg})
         opt = torch.optim.AdamW(groups, weight_decay=0.01)
+        all_params = fparams + vparams + (list(rel_head.parameters()) if rel_head is not None else [])
+        verify_frozen_backbone_and_optimizer(model, opt, all_params)
         base_lrs = [g["lr"] for g in groups]
         dl = DataLoader(train, batch_size=args.bs, shuffle=True, drop_last=True, num_workers=args.workers,
                         collate_fn=make_collate(data, paths, ip, tok, args.seq, args.arm != "ce"),
@@ -307,16 +369,27 @@ def main():
                 log(f"  eval@{step} (front v̂): " + " ".join(f"{k}={v:.4f}" for k, v in ev.items() if isinstance(v, (int, float))))
         result["train_seconds"] = time.time() - t0
 
+    frozen_info = verify_frozen_backbone_and_optimizer(model, opt, all_params if all_params else None, pre_hashes)
     srcs = {"oracle": ["teacher"], "front_frozen": ["front"], "joint": ["front", "teacher"]}[args.stage]
     result["eval"] = {}
     for s in srcs:
         ev = joint_eval(model, front, registry, tok, data, val_eval, paths, ip, dev, args.seq, s)
+        if s == "front":
+            ev.update(front_greedy_em(model, front, registry, tok, data, val_em_1000, paths, ip, dev,
+                                      n=len(val_em_1000), max_new=24, bs=8))
+            ev["val_em_sha1"] = val_1000_sha1
         result["eval"][s] = ev
         log(f"FINAL[{s}] " + " ".join(f"{k}={v:.4f}" for k, v in ev.items() if isinstance(v, (int, float))))
+    manifest = build_run_manifest("joint_train", vars(args), split_info,
+                                  extra={"frozen_check": frozen_info, "val_em_sha1": val_1000_sha1,
+                                         "backbone_sha1_before": pre_bb_sha1})
+    result["manifest"] = manifest
+    result["frozen_check"] = frozen_info
     result["peak_gib"] = torch.cuda.max_memory_allocated() / 1024**3
     json.dump(result, open(args.out + ".json", "w"), indent=1, ensure_ascii=False)
     if args.stage == "joint":
-        torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs], "args": vars(args)},
+        torch.save({"front": front.state_dict(), "vrmg": [m.state_dict() for m in vrmgs],
+                    "args": vars(args), "manifest": manifest},
                    args.out + ".pt")
     log("JOINT_DONE")
 

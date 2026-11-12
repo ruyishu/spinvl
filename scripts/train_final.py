@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from wrap import attach_rotation, freeze_all_but, rotation_context_with  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
@@ -276,24 +277,72 @@ def _norm(s):
     return s
 
 
+def _stop_ids(tok):
+    s = {tok.eos_token_id, tok.pad_token_id}
+    return sorted(x for x in s if x is not None)
+
+
+def _cut_at_stop(row, stop_set):
+    out = []
+    for t in row.tolist():
+        if int(t) in stop_set:
+            break
+        out.append(int(t))
+    return out
+
+
+def _pad_vis_list(v_list, dev):
+    n = max(v.shape[0] for v in v_list)
+    out = torch.zeros(len(v_list), n, v_list[0].shape[-1], device=dev, dtype=torch.float32)
+    m = torch.zeros(len(v_list), n, device=dev)
+    for i, v in enumerate(v_list):
+        out[i, : v.shape[0]] = v
+        m[i, : v.shape[0]] = 1.0
+    return out, m
+
+
 @torch.no_grad()
-def eval_accuracy(model, registry, tok, val, data, dev, n=60, max_new=8):
+def eval_greedy_stats(model, registry, tok, val, data, dev, n=1000, max_new=24, bs=8):
+    """统一验证集贪婪生成评测协议（与 Tower-Free / OPD 完全一致：max_new=24, bs=8, 左填充, stop_ids 截断）。"""
     model.eval()
-    hit = 0
-    for i in val[:n]:
-        prompt = data["prompts"][i]
-        ids = tok(prompt)["input_ids"]
-        ids_t = torch.tensor([ids], device=dev)
-        vis = data["vfeat"][i].unsqueeze(0).to(dev).float()
-        vm = torch.ones(1, vis.shape[1], device=dev)
-        with rotation_context_with(registry, vis, vm):
-            out = model.generate(input_ids=ids_t, max_new_tokens=max_new, do_sample=False,
-                                 pad_token_id=tok.eos_token_id)
-        pred = tok.decode(out[0, len(ids):], skip_special_tokens=True)
-        if _norm(pred) == _norm(data["answers"][i]):
-            hit += 1
+    orig_side = tok.padding_side
+    stops = _stop_ids(tok)
+    stop_set = set(stops)
+    pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
+    eval_idx = list(val[:n])
+    hit = stopped = tot_len = rep3_cnt = cnt = 0
+    for s0 in range(0, len(eval_idx), bs):
+        chunk = eval_idx[s0 : s0 + bs]
+        pids = [tok(data["prompts"][i])["input_ids"] for i in chunk]
+        pad = max(len(x) for x in pids)
+        in_ids = torch.tensor([[pad_id] * (pad - len(x)) + x for x in pids], device=dev)
+        attn = torch.tensor([[0] * (pad - len(x)) + [1] * len(x) for x in pids], device=dev)
+        vis_list = [data["vfeat"][i].float() for i in chunk]
+        vis, vm = _pad_vis_list(vis_list, dev)
+        with rotation_context_with(registry, vis, vm, text_mask=attn):
+            out = model.generate(input_ids=in_ids, attention_mask=attn, max_new_tokens=max_new,
+                                 do_sample=False, pad_token_id=pad_id, eos_token_id=stops)
+        for j, i in enumerate(chunk):
+            gen = out[j, pad:]
+            raw_ids = [int(x) for x in gen.tolist()]
+            has_eos = any(t in stop_set for t in raw_ids)
+            real = _cut_at_stop(gen, stop_set)
+            pred = tok.decode(real, skip_special_tokens=True)
+            hit += int(_norm(pred) == _norm(data["answers"][i]))
+            stopped += int(has_eos)
+            tot_len += len(real)
+            ng3 = [tuple(real[m : m + 3]) for m in range(max(0, len(real) - 2))]
+            rep3_cnt += int(len(ng3) >= 2 and len(set(ng3)) < len(ng3))
+            cnt += 1
+    tok.padding_side = orig_side
     model.train()
-    return hit / max(min(n, len(val)), 1)
+    return {"em": hit / max(cnt, 1), "stop_rate": stopped / max(cnt, 1),
+            "mean_len": tot_len / max(cnt, 1), "rep3_rate": rep3_cnt / max(cnt, 1), "em_n": cnt}
+
+
+@torch.no_grad()
+def eval_accuracy(model, registry, tok, val, data, dev, n=1000, max_new=24):
+    return eval_greedy_stats(model, registry, tok, val, data, dev, n=n, max_new=max_new)["em"]
 
 
 class LazyFeats:
@@ -462,6 +511,8 @@ def main():
         log(f"ALIGN_CHECK teacher_top1_hit={hit:.3f} on {int(m.sum())} tokens")
 
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.01)
+    pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
+    verify_frozen_backbone_and_optimizer(model, opt, params)
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1.0, (s + 1) / 50) * 0.5 * (1 + math.cos(math.pi * min(s, args.steps) / args.steps)))
 
@@ -543,15 +594,20 @@ def main():
                 + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f} "
                   f"peak={torch.cuda.max_memory_allocated()/1024**3:.1f}GiB")
 
+    frozen_info = verify_frozen_backbone_and_optimizer(model, opt, params, pre_hashes)
     val_em_sub, val_1000_sha1 = select_stratified_val_1000(val, data, n_target=args.em_n, seed=0)
     ev = eval_losses(model, registry, tok, val, data, args.seq, dev, n_batches=len(val) // 8 + 1)
-    acc = eval_accuracy(model, registry, tok, val_em_sub, data, dev, n=len(val_em_sub))
+    gen_st = eval_greedy_stats(model, registry, tok, val_em_sub, data, dev, n=len(val_em_sub), max_new=24)
+    acc = gen_st["em"]
     v_first, v_full = eval_tf_acc(model, registry, tok, data, val, dev)
     log(f"FINAL {args.arm}: correct={ev['correct']:.4f} shuffled={ev['shuffled']:.4f} no_image={ev['no_image']:.4f}"
-        + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f}(n={len(val_em_sub)}) tf_first={v_first:.3f} tf_full={v_full:.3f}")
-    result = {"args": vars(args), "split_info": split_info,
-              "trainable_params": int(n_train),
-              "val": {**ev, "gap": ev["shuffled"] - ev["correct"], "em": acc, "em_n": len(val_em_sub),
+        + f" gap={ev['shuffled']-ev['correct']:+.4f} EM={acc:.3f}(n={len(val_em_sub)}) stop={gen_st['stop_rate']:.3f} tf_first={v_first:.3f} tf_full={v_full:.3f}")
+    manifest = build_run_manifest("tower_train", vars(args), split_info,
+                                  extra={"frozen_check": frozen_info, "val_em_sha1": val_1000_sha1,
+                                         "backbone_sha1_before": pre_bb_sha1})
+    result = {"args": vars(args), "split_info": split_info, "manifest": manifest,
+              "trainable_params": int(n_train), "frozen_check": frozen_info,
+              "val": {**ev, "gap": ev["shuffled"] - ev["correct"], **gen_st,
                       "val_em_sha1": val_1000_sha1, "tf_first": v_first, "tf_full": v_full},
               "train_steps": args.steps, "train_seconds": time.time() - t0,
               "peak_gib": torch.cuda.max_memory_allocated() / 1024**3}
@@ -564,13 +620,13 @@ def main():
         t_em = eval_accuracy(model, registry, tok, tidx, tdata, dev, n=args.test_em_n)
         result["test"] = {**tev, "gap": tev["shuffled"] - tev["correct"], "em": t_em,
                           "tf_first": t_first, "tf_full": t_full, "n": len(tidx)}
-        log(f"TEST: " + " ".join(f"{k}={v:.4f}" for k, v in tev.items())
+        log(f"TEST: " + " ".join(f"{k}={v:.4f}" for k, v in tev.items() if isinstance(v, (int, float)))
             + f" EM={t_em:.3f} tf_first={t_first:.3f} tf_full={t_full:.3f} n={len(tidx)}")
 
     ckpt = args.log.replace(".log", "_pt.pt")
     torch.save({"state": [m.state_dict() for m in vrmgs],
                 "rel_head": rel_head.state_dict() if rel_head is not None else None,
-                "args": vars(args)}, ckpt)
+                "args": vars(args), "manifest": manifest}, ckpt)
     if args.result_json:
         os.makedirs(os.path.dirname(args.result_json) or ".", exist_ok=True)
         json.dump(result, open(args.result_json, "w"), indent=1, ensure_ascii=False)

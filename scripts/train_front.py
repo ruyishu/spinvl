@@ -20,10 +20,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import imgdata  # noqa: E402
 from front import PatchFront, feature_loss  # noqa: E402
+from provenance import build_run_manifest, snapshot_backbone_hashes, verify_frozen_backbone_and_optimizer  # noqa: E402
 from train_final import load_data, split_train_val_by_image as tf_split_by_image  # noqa: E402
 from wrap import attach_rotation, freeze_all_but  # noqa: E402
 
 B = "/data/ibu-bi-ai-share-disk"
+
+
+def prepare_front_split(source_specs, seed=0):
+    """前端预热的数据加载与图像级切分入口（供训练与门禁脚本直接调用验证跨阶段一致性）。"""
+    meta_list, paths = [], {}
+    for spec in source_specs:
+        m_p, p_map = imgdata.parse_source(spec)
+        meta_list.append(m_p)
+        paths.update(p_map)
+    data = load_data(",".join(meta_list))
+    train_idx, val_idx, split_info = tf_split_by_image(data, paths, seed=seed)
+    train_items = [(i, paths[data["ids"][i]]) for i in train_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
+    val_items = [(i, paths[data["ids"][i]]) for i in val_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
+    return data, paths, train_idx, val_idx, train_items, val_items, split_info
 
 
 @torch.no_grad()
@@ -69,15 +84,7 @@ def main():
         print(m, flush=True); logf.write(m + "\n"); logf.flush()
 
     ip = AutoProcessor.from_pretrained(imgdata.TEACHER, trust_remote_code=True).image_processor
-    meta_list, paths = [], {}
-    for spec in args.source:
-        m_p, p_map = imgdata.parse_source(spec)
-        meta_list.append(m_p)
-        paths.update(p_map)
-    data = load_data(",".join(meta_list))
-    train_idx, val_idx, split_info = tf_split_by_image(data, paths, seed=args.seed)
-    train_items = [(i, paths[data["ids"][i]]) for i in train_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
-    val_items = [(i, paths[data["ids"][i]]) for i in val_idx if data["ids"][i] in paths and data["vlen"][i] > 0]
+    data, paths, train_idx, val_idx, train_items, val_items, split_info = prepare_front_split(args.source, seed=args.seed)
     if args.n_val and args.n_val < len(val_items):
         val_eval_items = val_items[: args.n_val]
     else:
@@ -127,6 +134,8 @@ def main():
     if front.copies is not None:
         groups.append({"params": list(front.copies.parameters()), "lr": 1e-4})
     opt = torch.optim.AdamW(groups, weight_decay=0.01)
+    pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
+    verify_frozen_backbone_and_optimizer(model, opt, params)
     base_lrs = [g["lr"] for g in groups]
 
     def set_lr(step):
@@ -161,13 +170,17 @@ def main():
             ex = {k: evaluate(front, ld, dev, 12) for k, ld in eval_lds.items()}
             log(f"  eval@{step}: val_cos={c:.4f} " + " ".join(f"{k}={v:.4f}" for k, v in ex.items()))
 
+    frozen_info = verify_frozen_backbone_and_optimizer(model, opt, params, pre_hashes)
     c = evaluate(front, val_ld, dev, 100)
     ex = {k: evaluate(front, ld, dev, 40) for k, ld in eval_lds.items()}
     log(f"FINAL val_cos={c:.4f} " + " ".join(f"{k}={v:.4f}" for k, v in ex.items()))
+    manifest = build_run_manifest("front_train", vars(args), split_info,
+                                  extra={"frozen_check": frozen_info, "backbone_sha1_before": pre_bb_sha1})
     torch.save({"front": {k: v for k, v in front.state_dict().items()}, "args": vars(args), "vdim": vdim,
-                "split_info": split_info},
+                "split_info": split_info, "manifest": manifest},
                args.out + ".pt")
-    json.dump({"args": vars(args), "split_info": split_info, "val_cos": c, "extra_cos": ex,
+    json.dump({"args": vars(args), "split_info": split_info, "manifest": manifest,
+               "frozen_check": frozen_info, "val_cos": c, "extra_cos": ex,
                "trainable_M": n_tr / 1e6, "static_M": n_static / 1e6,
                "front_total_params": int(n_tr), "static_params": int(n_static),
                "merger_params": int(n_merger), "patch_pos_params": int(n_patch),

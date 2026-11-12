@@ -3,9 +3,9 @@
 import math
 import re
 
-SCORER_VERSION = "clean_v6_official_relaxed_v1"
+SCORER_VERSION = "clean_v6_official_relaxed_v2"
 
-_NUM = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s*/\s*(\d+(?:\.\d+)?))?")
+_NUM = re.compile(r"(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:\s*/\s*(\d+(?:\.\d+)?))?\s*(%)?")
 _BOXED = re.compile(r"\\boxed\{([^{}]+)\}")
 _YN_MAP = {"true": "yes", "false": "no", "y": "yes", "n": "no"}
 _ANS_PREFIX = re.compile(r"^(?:the\s+)?(?:final\s+)?(?:answer|choice|option|conclusion)\s*(?:is)?\s*[:=-]?\s*", re.I)
@@ -30,7 +30,7 @@ def cnorm(s):
     return norm(s).strip(".;:!?\"'()")
 
 
-def first_number(s):
+def first_number_with_pct(s):
     s = str(s)
     mb = _BOXED.findall(s)
     if mb:
@@ -39,12 +39,20 @@ def first_number(s):
     s = re.sub(r"^\s*\([a-zA-Z0-9]\)\s*", "", s.replace(",", ""))
     m = _NUM.search(s)
     if not m:
-        return None
+        return None, False
     num = float(m.group(1))
+    has_pct = bool(m.group(3))
     if m.group(2) is not None:
         den = float(m.group(2))
-        return num / den if den != 0 else None
-    return num
+        if den == 0:
+            return None, False
+        num = num / den
+    return num, has_pct
+
+
+def first_number(s):
+    val, _ = first_number_with_pct(s)
+    return val
 
 
 def _has_negation_before(text_low, target_low):
@@ -95,14 +103,6 @@ def hit_mc(pred, choices, gold_idx):
     return gold_idx >= 0 and pick_choice(pred, choices) == gold_idx
 
 
-def _tf(t):
-    t = str(t).strip().replace(",", "").replace("$", "")
-    try:
-        return float(t[:-1]) / 100.0 if t.endswith("%") else float(t)
-    except ValueError:
-        return None
-
-
 def extract_answer_text(pred: str) -> str:
     """统一答案抽取：优先取 \\boxed{...}，否则取首个非空行并剥离标准前缀与末尾句号。"""
     s = str(pred or "").strip()
@@ -115,28 +115,47 @@ def extract_answer_text(pred: str) -> str:
     return s.rstrip(".").strip()
 
 
+def _parse_num_and_pct(t):
+    """解析纯数值字符串，返回 (不除以100的原始数值, 是否显式带百分号 %)。"""
+    t = str(t).strip().replace(",", "").replace("$", "")
+    has_pct = t.endswith("%")
+    if has_pct:
+        t = t[:-1].strip()
+    try:
+        return float(t), has_pct
+    except ValueError:
+        return None, False
+
+
+def _rel_ok(pred_val: float, gold_val: float, tol: float = 0.05) -> bool:
+    if gold_val == 0.0:
+        return abs(pred_val) <= 1e-6
+    return abs(pred_val - gold_val) / abs(gold_val) <= tol
+
+
 def hit_relaxed(pred, golds):
-    """ChartQA 官方 relaxed correctness：数值相对误差 ≤5%（仅当显式带 % 时做百分数换算），非数值要求同义归一后精确匹配（无任意包含匹配）。"""
+    """ChartQA 官方 relaxed correctness：数值相对误差 ≤5%（仅当预测与金标恰好一方显式带 % 时做单次 ×100/÷100 换算，绝不二次换算），非数值要求同义归一后精确匹配。"""
     p = extract_answer_text(pred)
     if not p:
         return False
-    p_has_pct = "%" in p
+    pf_exact, p_pct_exact = _parse_num_and_pct(p)
+    pf_extracted, p_pct_extracted = first_number_with_pct(p)
     for g in golds:
         g_str = str(g).strip()
-        g_has_pct = "%" in g_str
-        gf = _tf(g_str)
-        pf = _tf(p)
-        if pf is None and gf is not None:
-            pf = first_number(p)
-        if pf is not None and gf is not None:
-            if gf == 0.0:
-                if abs(pf) <= 1e-6:
-                    return True
+        gf, g_has_pct = _parse_num_and_pct(g_str)
+        if gf is not None:
+            if pf_exact is not None:
+                pf, p_has_pct = pf_exact, p_pct_exact
             else:
-                if abs(pf - gf) / abs(gf) <= 0.05:
-                    return True
-                if (p_has_pct or g_has_pct) and abs(pf / 100.0 - gf) / abs(gf) <= 0.05:
-                    return True
+                pf, p_has_pct = pf_extracted, p_pct_extracted
+            if pf is None:
+                continue
+            if _rel_ok(pf, gf):
+                return True
+            if p_has_pct and not g_has_pct and _rel_ok(pf / 100.0, gf):
+                return True
+            if g_has_pct and not p_has_pct and _rel_ok(pf * 100.0, gf):
+                return True
         else:
             gs = _YN_MAP.get(g_str.lower().rstrip("."), g_str.lower().rstrip("."))
             ps = _YN_MAP.get(p.lower().rstrip("."), p.lower().rstrip("."))
@@ -224,8 +243,10 @@ def selftest():
     assert hit_relaxed("14", ["14"]) and hit_relaxed("The answer is 14.5", ["14"]) and not hit_relaxed("15", ["14"])
     assert not hit_relaxed("1400", ["14"]) and not hit_relaxed("not blue", ["blue"])
     assert not hit_relaxed("100", ["1"]) and not hit_relaxed("10", ["0.1"])
+    assert not hit_relaxed("24%", ["0.0024"]) and not hit_relaxed("100%", ["0.01"])
+    assert not hit_relaxed("0.24", ["0.0024%"]) and not hit_relaxed("The answer is 24%", ["0.0024"])
     assert not hit_relaxed("The. The. No. The", ["No"])
-    assert hit_relaxed("24%", ["0.24"]) and hit_relaxed("24", ["24%"])
+    assert hit_relaxed("24%", ["0.24"]) and hit_relaxed("24%", ["24"]) and hit_relaxed("24", ["24%"]) and hit_relaxed("0.24", ["24%"])
     assert hit_relaxed("False", ["No"]) and hit_relaxed("True", ["Yes"])
     assert first_number("1e3") == 1000.0 and first_number("1/2") == 0.5
     assert not hit_mv_free("10.4", "10", "float", 2)

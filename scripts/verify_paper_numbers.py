@@ -1,14 +1,16 @@
-"""Verify that every table row in paper/sections/4_experiments.tex maps 1-to-1 to a real JSON file on disk by parsing the actual LaTeX source file directly."""
+"""Verify that every table row across all 8 tables in paper/sections/4_experiments.tex maps 1-to-1 to real JSON files on disk by parsing the actual LaTeX source file directly."""
 
 import json
 import pathlib
 import re
+import statistics
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEX_PATH = ROOT / "paper" / "sections" / "4_experiments.tex"
 BENCH = ROOT / "results" / "benchmarks"
 TLOG = ROOT / "results" / "train_logs"
 V5 = ROOT / "results" / "clean_v5"
+PRES = ROOT / "results" / "paper_results.json"
 
 
 def load_b(path):
@@ -30,7 +32,7 @@ def clean_tex_cell(cell: str) -> str:
     s = cell.strip()
     s = re.sub(r"\\+$", "", s).strip()
     while True:
-        s_new = re.sub(r"\\(?:textbf|underline|texttt|emph|textit)\{([^{}]*)\}", r"\1", s)
+        s_new = re.sub(r"\\(?:textbf|underline|texttt|emph|textit|mathbf)\{([^{}]*)\}", r"\1", s)
         s_new = re.sub(r"\{\\color\{[^{}]+\}([^{}]*)\}", r"\1", s_new)
         if s_new == s:
             break
@@ -66,12 +68,18 @@ def assert_rounded(tag, field, json_val, tex_str, decimals=2):
             )
 
 
+def parse_mean_std(cell_str: str):
+    m = re.match(r"([0-9.]+)_\{?\\pm([0-9.]+)\}?", cell_str)
+    assert m, f"Cannot parse mean+-std from '{cell_str}'"
+    return float(m.group(1)), float(m.group(2))
+
+
 def main():
     tex_text = TEX_PATH.read_text(encoding="utf-8")
     checks = 0
 
     # 1. Table 1 (tab:main)
-    t1_rows = extract_table_block(tex_text, "tab:main")[1:]  # skip header row
+    t1_rows = extract_table_block(tex_text, "tab:main")[1:]
     t1_files = [
         ("Teacher", BENCH / "teacher_qwen3vl8b.json"),
         ("Blank Control", V5 / "eval" / "v5_tower_spinvl_full_blank.json"),
@@ -100,14 +108,63 @@ def main():
         ("Free+VL-OPD 1.7B 21k s0", BENCH / "q17_free_hybrid_opd.json"),
         ("Free+VL-OPD 0.6B 28k s0", BENCH / "q06_p15_free_hybrid_opd.json"),
     ]
-    assert len(t1_rows) == len(t1_files), f"tab:main row count {len(t1_rows)} != {len(t1_files)}"
+    assert len(t1_rows) == len(t1_files)
     for cells, (name, bp) in zip(t1_rows, t1_files):
         s = load_b(bp)
         for idx, k in zip((5, 6, 7, 8, 9, 10), ("mm", "ha", "mv", "mc2", "core3", "avg6")):
             assert_rounded(f"Tab1:{name}", k, s[k], cells[idx], decimals=2)
             checks += 1
 
-    # 2. Table 3 (tab:front)
+    # 2. Table 2 (tab:scale: single runs + 3-seed mean/std rows)
+    t2_rows = extract_table_block(tex_text, "tab:scale")[1:]
+    t2_spec = [
+        ("0.6B Tower 28k s0", [BENCH / "q06_p15_tower_hybrid_ce.json"]),
+        ("0.6B Free 21k s0", [BENCH / "q06_free_ce.json"]),
+        ("0.6B Free+OPD 21k s0", [BENCH / "q06_free_opd.json"]),
+        ("0.6B Free+OPD 28k s0", [BENCH / "q06_p15_free_hybrid_opd.json"]),
+        ("0.6B Free+OPD 28k 3seeds", [
+            BENCH / "q06_p15_free_hybrid_opd.json",
+            BENCH / "q06_p15_free_hybrid_opd_s1.json",
+            BENCH / "q06_p15_free_hybrid_opd_s2.json",
+        ]),
+        ("1.7B Tower 28k 3seeds", [
+            BENCH / "q17_p15_tower_hybrid_ce.json",
+            BENCH / "q17_p15_tower_hybrid_ce_s1.json",
+            BENCH / "q17_p15_tower_hybrid_ce_s2.json",
+        ]),
+        ("1.7B Free 28k 3seeds", [
+            BENCH / "q17_p15_free_hybrid_ce.json",
+            BENCH / "q17_p15_free_hybrid_ce_s1.json",
+            BENCH / "q17_p15_free_hybrid_ce_s2.json",
+        ]),
+        ("1.7B Free+OPD 28k 3seeds", [
+            BENCH / "q17_p15_free_hybrid_opd.json",
+            BENCH / "q17_p15_free_hybrid_opd_s1.json",
+            BENCH / "q17_p15_free_hybrid_opd_s2.json",
+        ]),
+        ("8B Tower 28k s0", [BENCH / "q8b_p15_tower_hybrid_ce.json"]),
+        ("8B Free 28k s0", [BENCH / "q8b_p15_free_hybrid_ce.json"]),
+        ("8B Free+OPD 28k s0", [BENCH / "q8b_p15_free_hybrid_opd.json"]),
+    ]
+    assert len(t2_rows) == len(t2_spec)
+    for cells, (name, paths) in zip(t2_rows, t2_spec):
+        loaded = [load_b(p) for p in paths]
+        for idx, k in zip((2, 3, 4, 5, 6, 7), ("mm", "ha", "mv", "mc2", "core3", "avg6")):
+            if len(loaded) == 1:
+                assert_rounded(f"Tab2:{name}", k, loaded[0][k], cells[idx], decimals=2)
+                checks += 1
+            else:
+                vals = [x[k] for x in loaded]
+                mean_v = statistics.mean(vals)
+                std_p = statistics.pstdev(vals)
+                std_s = statistics.stdev(vals)
+                m_tex, s_tex = parse_mean_std(cells[idx])
+                assert_rounded(f"Tab2:{name}", f"{k}_mean", mean_v, str(m_tex), decimals=2)
+                if min(abs(std_p - s_tex), abs(std_s - s_tex)) > 0.02:
+                    raise AssertionError(f"[MISMATCH] Tab2:{name}.{k}_std: pstdev={std_p:.4f} stdev={std_s:.4f} vs tex={s_tex}")
+                checks += 2
+
+    # 3. Table 3 (tab:front)
     t3_rows = extract_table_block(tex_text, "tab:front")[1:]
     t3_files = [
         ("none K=0", TLOG / "p4_none_K0_joint.json", BENCH / "q17_abl_front_none_K0.json"),
@@ -132,28 +189,38 @@ def main():
         assert_rounded(f"Tab3:{name}", "avg6", bs["avg6"], cells[9], decimals=2)
         checks += 7
 
-    # 3. Table 4 (tab:depth)
+    # 4. Table 4 (tab:depth: all 5 rows including 3-seed mean row)
     t4_rows = extract_table_block(tex_text, "tab:depth")[1:]
     t4_single = [
-        (0, "K=0 s0", TLOG / "p18_q17_free_hyb_K0_joint.json", BENCH / "q17_p18_free_hyb_K0.json"),
-        (1, "K=2 s0", TLOG / "p18_q17_free_hyb_K2_joint.json", BENCH / "q17_p18_free_hyb_K2.json"),
-        (2, "K=4 s0", TLOG / "p15_q17_free_hybrid_joint.json", BENCH / "q17_p15_free_hybrid_ce.json"),
-        (4, "K=6 s0", TLOG / "p18_q17_free_hyb_K6_joint.json", BENCH / "q17_p18_free_hyb_K6.json"),
+        (0, "K=0 s0", [TLOG / "p18_q17_free_hyb_K0_joint.json"], [BENCH / "q17_p18_free_hyb_K0.json"]),
+        (1, "K=2 s0", [TLOG / "p18_q17_free_hyb_K2_joint.json"], [BENCH / "q17_p18_free_hyb_K2.json"]),
+        (2, "K=4 s0", [TLOG / "p15_q17_free_hybrid_joint.json"], [BENCH / "q17_p15_free_hybrid_ce.json"]),
+        (3, "K=4 3seeds", [
+            TLOG / "p15_q17_free_hybrid_joint.json",
+            TLOG / "p18_q17_free_hybrid_joint_s1.json",
+            TLOG / "p18_q17_free_hybrid_joint_s2.json",
+        ], [
+            BENCH / "q17_p15_free_hybrid_ce.json",
+            BENCH / "q17_p15_free_hybrid_ce_s1.json",
+            BENCH / "q17_p15_free_hybrid_ce_s2.json",
+        ]),
+        (4, "K=6 s0", [TLOG / "p18_q17_free_hyb_K6_joint.json"], [BENCH / "q17_p18_free_hyb_K6.json"]),
     ]
-    for r_idx, name, tp, bp in t4_single:
+    for r_idx, name, tps, bps in t4_single:
         cells = t4_rows[r_idx]
-        td = json.loads(tp.read_text(encoding="utf-8"))["eval"]["front"]
-        bs = load_b(bp)
-        assert_rounded(f"Tab4:{name}", "ce", td["correct"], cells[2], decimals=3)
-        assert_rounded(f"Tab4:{name}", "gap", td["gap"], cells[3], decimals=3)
-        assert_rounded(f"Tab4:{name}", "1st", td["tf_first"] * 100, cells[4], decimals=1)
-        assert_rounded(f"Tab4:{name}", "mc2", bs["mc2"], cells[5], decimals=2)
-        assert_rounded(f"Tab4:{name}", "core3", bs["core3"], cells[6], decimals=2)
-        assert_rounded(f"Tab4:{name}", "avg6", bs["avg6"], cells[7], decimals=2)
+        tds = [json.loads(tp.read_text(encoding="utf-8"))["eval"]["front"] for tp in tps]
+        bss = [load_b(bp) for bp in bps]
+        assert_rounded(f"Tab4:{name}", "ce", statistics.mean(x["correct"] for x in tds), cells[2], decimals=3)
+        assert_rounded(f"Tab4:{name}", "gap", statistics.mean(x["gap"] for x in tds), cells[3], decimals=3)
+        assert_rounded(f"Tab4:{name}", "1st", statistics.mean(x["tf_first"] * 100 for x in tds), cells[4], decimals=1)
+        assert_rounded(f"Tab4:{name}", "mc2", statistics.mean(x["mc2"] for x in bss), cells[5], decimals=2)
+        assert_rounded(f"Tab4:{name}", "core3", statistics.mean(x["core3"] for x in bss), cells[6], decimals=2)
+        assert_rounded(f"Tab4:{name}", "avg6", statistics.mean(x["avg6"] for x in bss), cells[7], decimals=2)
         checks += 6
 
-    # 4. Table 5 (tab:opd top block)
-    t5_rows = extract_table_block(tex_text, "tab:opd")[1:6]
+    # 5. Table 5 (tab:opd: top block + bottom free-form generation block)
+    t5_all = extract_table_block(tex_text, "tab:opd")
+    t5_rows = t5_all[1:6]
     t5_files = [
         ("Start CE", TLOG / "p15_q17_free_hybrid_opd.json", "init_eval", BENCH / "q17_p15_free_hybrid_ce.json"),
         ("GKD", TLOG / "p19_q17_free_hybrid_gkd.json", "eval", BENCH / "q17_p19_free_hybrid_gkd.json"),
@@ -170,7 +237,39 @@ def main():
         assert_rounded(f"Tab5:{name}", "core3", bs["core3"], cells[5], decimals=2)
         checks += 4
 
-    # 5. Table 6/7 (tab:boundary)
+    t5_fgen_rows = t5_all[6:]
+    t5_fgen_files = [
+        ("0.6B before", BENCH / "q06_p15_free_hyb_ce_fgen.json"),
+        ("0.6B after", BENCH / "q06_p15_free_hyb_opd_fgen.json"),
+        ("1.7B before", BENCH / "q17_p9_free_hyb_ce_fgen.json"),
+        ("1.7B after", BENCH / "q17_p9_free_hyb_opd_fgen.json"),
+    ]
+    assert len(t5_fgen_rows) == len(t5_fgen_files)
+    for cells, (name, bp) in zip(t5_fgen_rows, t5_fgen_files):
+        bs = load_b(bp)
+        assert_rounded(f"Tab5Fgen:{name}", "mm", bs["mm"], cells[2], decimals=2)
+        assert_rounded(f"Tab5Fgen:{name}", "ha", bs["ha"], cells[3], decimals=2)
+        assert_rounded(f"Tab5Fgen:{name}", "mv", bs["mv"], cells[4], decimals=2)
+        assert_rounded(f"Tab5Fgen:{name}", "mc2", bs["mc2"], cells[5], decimals=2)
+        checks += 4
+
+    # 6. Table 6 (tab:eff)
+    t_eff_rows = extract_table_block(tex_text, "tab:eff")[2:]  # skip 2-line header
+    eff_json = json.loads(PRES.read_text(encoding="utf-8"))["efficiency_K4"]["rows"]
+    assert len(t_eff_rows) == len(eff_json)
+    for cells, erow in zip(t_eff_rows, eff_json):
+        assert int(cells[0]) == erow["N_patches"]
+        for c_idx, key in ((1, "ours"), (2, "rose"), (3, "llava")):
+            tf_s, ms_s = cells[c_idx].split("/")
+            assert_rounded(f"TabEff:{erow['N_patches']}.{key}", "tflops", erow[key]["tflops"], tf_s, decimals=2)
+            assert_rounded(f"TabEff:{erow['N_patches']}.{key}", "ms", erow[key]["ms"], ms_s, decimals=1)
+            checks += 2
+        sav_expected = (erow["ours"]["tflops"] - erow["llava"]["tflops"]) / erow["llava"]["tflops"] * 100
+        sav_str = cells[4].replace("\\mathbf{", "").replace("}", "").replace("−", "-")
+        assert_rounded(f"TabEff:{erow['N_patches']}", "saving", sav_expected, sav_str, decimals=1)
+        checks += 1
+
+    # 7. Table 7 (tab:boundary)
     t6_rows = extract_table_block(tex_text, "tab:boundary")[1:]
     t6_files = [
         ("LLaVA 21k", BENCH / "q17_proj_n21000.json"),
@@ -185,8 +284,8 @@ def main():
         assert_rounded(f"TabBoundary:{name}", "g3", bs["g3"], cells[4], decimals=2)
         checks += 3
 
-    # 6. Table 7/8 (tab:grounding)
-    t7_rows = extract_table_block(tex_text, "tab:grounding")[2:]  # skip 2-line header
+    # 8. Table 8 (tab:grounding)
+    t7_rows = extract_table_block(tex_text, "tab:grounding")[2:]
     t7_files = [
         ("Teacher v5", None, V5 / "eval" / "re_teacher_qwen3vl8b.json", V5 / "eval" / "re_teacher_qwen3vl8b_shuffle.json"),
         ("LLaVA v5", None, V5 / "eval" / "v5_proj_llava.json", V5 / "eval" / "v5_proj_llava_shuffle.json"),
@@ -219,7 +318,7 @@ def main():
         assert_rounded(f"TabGrounding:{name}", "core3", sr["core3"], cells[6], decimals=2)
         checks += 8
 
-    print(f"ALL_PAPER_TEX_NUMBERS_VERIFIED_OK: {checks} cells parsed directly from {TEX_PATH.name} and verified against raw JSONs!")
+    print(f"ALL_8_TABLES_TEX_VERIFIED_OK: {checks} cells/stats across all 8 tables in {TEX_PATH.name} parsed and verified against JSONs!")
 
 
 if __name__ == "__main__":

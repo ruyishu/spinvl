@@ -221,11 +221,11 @@ $0.6$B & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 26.40 & 57.73 & 20.20 & 42.06
 $0.6$B & Free (CE, $21$k, $s{=}0$)               & 28.07 & 54.68 & 20.40 & 41.37 & 34.38 & 18.03 \\
 $0.6$B & Free+OPD ($21$k, $s{=}0$)               & 28.87 & 54.47 & 19.00 & 41.67 & 34.11 & 17.69 \\
 $0.6$B & Free+OPD ($28$k, $s{=}0$)               & 27.53 & 57.83 & 18.60 & \textbf{42.68} & \textbf{34.66} & \textbf{18.05} \\
-$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.35$_{\pm2.21}$ & \textbf{57.69}$_{\pm0.10}$ & 18.73$_{\pm0.09}$ & 41.52$_{\pm1.14}$ & 33.93$_{\pm0.74}$ & 17.62$_{\pm0.41}$ \\
+$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36$_{\pm2.21}$ & \textbf{57.69}$_{\pm0.10}$ & 18.73$_{\pm0.09}$ & 41.52$_{\pm1.14}$ & 33.93$_{\pm0.74}$ & 17.62$_{\pm0.41}$ \\
 \midrule
 $1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56$_{\pm1.21}$ & 56.36$_{\pm0.85}$ & 18.97$_{\pm0.97}$ & \textbf{41.46}$_{\pm0.62}$ & \textbf{33.96}$_{\pm0.48}$ & \textbf{17.68}$_{\pm0.35}$ \\
 $1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89}$_{\pm1.87}$ & 53.84$_{\pm1.04}$ & 19.00$_{\pm1.68}$ & 40.36$_{\pm0.68}$ & 33.24$_{\pm0.93}$ & 17.27$_{\pm0.36}$ \\
-$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm2.62}$ & 56.11$_{\pm1.42}$ & \textbf{19.13}$_{\pm0.82}$ & 41.12$_{\pm1.10}$ & 33.79$_{\pm0.86}$ & 17.49$_{\pm0.24}$ \\
+$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm2.62}$ & 56.12$_{\pm1.42}$ & \textbf{19.13}$_{\pm0.82}$ & 41.11$_{\pm1.10}$ & 33.79$_{\pm0.86}$ & 17.49$_{\pm0.24}$ \\
 \midrule
 $8$B   & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 25.67 & 54.15 & 19.90 & 39.91 & 33.24 & 17.30 \\
 $8$B   & Free (\texttt{hyb}, $28$k, $s{=}0$)     & 24.80 & \textbf{56.99} & 19.20 & \textbf{40.90} & \textbf{33.66} & \textbf{17.50} \\
@@ -241,7 +241,7 @@ across three seeds), matching the $1.7$B models on perception and
 hallucination; the smallest student is therefore already sufficient for the
 abilities this paradigm provides. On $1.7$B (+open, $3$ seeds), online
 distillation improves the tower-free model's three-seed mean from $40.36\%$ to
-$41.12\%$ MC2 ($+0.76$ points) and from $33.24\%$ to $33.79\%$ Core3. Scaling
+$41.11\%$ MC2 ($+0.75$ points) and from $33.24\%$ to $33.79\%$ Core3. Scaling
 to $8$B does not help, and in our measurements slightly hurts: because the
 backbone is frozen and only the rotation generators are trained, additional
 capacity in the LLM does not translate into better visual steering, while a
@@ -306,6 +306,11 @@ holding the deep tier fixed at \texttt{mf}, rotation with channel scaling
 $36.84\%$), $+2.82$ points of Core3 ($33.55\%$ vs.\ $30.73\%$), and a larger
 validation grounding gap ($1.783$ vs.\ $1.667$). Even with a single-frequency deep
 tier, \texttt{rots} ($38.14\%$ MC2) exceeds LoRA+\texttt{mf} ($36.84\%$).
+(Note: in this $21$k sweep the LoRA baseline used transposed output-projection
+ranks totaling $3.74$M static parameters; in our $44$k debiased implementation
+of Tab.~\ref{tab:grounding}, rank-$16$ LoRA uses $2.49$M static parameters
+against $2.40$M for \texttt{rots}, plus the shared $54.03$M patch-embedding and
+merger module.)
 
 \paragraph{Depth of the built-in encoder.}
 \begin{table}[t]
@@ -361,9 +366,9 @@ Offline CE (Start)            & teacher-forced & 2.294 & 100.0\% & 41.09 & 33.76
 + VL-OPD (Ours)               & Forward KL      & 2.475 & 95.0\% & \underline{40.35} & \underline{32.90} \\
 \midrule
 \multicolumn{2}{@{}l}{\textit{Free-form greedy generation}} & MMStar & Hallu. & MathV. & MC2 \\
-$0.6$B Free & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
+$0.6$B Free ($28$k) & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
             & after VL-OPD  & \textbf{22.20} & \textbf{33.44} & \textbf{14.40} & \textbf{27.82} \\
-$1.7$B Free & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
+$1.7$B Free ($21$k) & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
             & after VL-OPD  & \textbf{18.13} & 22.92 & \textbf{9.30} & \textbf{20.53} \\
 \bottomrule
 \end{tabular}}

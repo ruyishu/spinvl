@@ -9,9 +9,11 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_data as bd  # noqa: E402
 import bench_score as bs  # noqa: E402
+from provenance import build_run_manifest, fast_file_sha256  # noqa: E402
 
 ROOT = bd.B + "/zk/project/rose-distill"
 
@@ -184,8 +186,22 @@ def main():
         pf.flush()
         print(f"== {b}: n={res[b]['n']} acc={res[b]['acc']:.4f} ci95={[round(x, 4) for x in res[b]['ci95']]} "
               f"empty={res[b]['empty_rate']:.2f}", flush=True)
-    out = {"name": args.name, "mode": args.mode, "ckpt": args.ckpt, "model": args.model, "arch": run.arch,
-           "scorer_version": bs.SCORER_VERSION,
+    ckpt_manifest = None
+    ckpt_sha256 = ""
+    if args.ckpt and os.path.exists(args.ckpt):
+        ckpt_sha256 = fast_file_sha256(args.ckpt)
+        try:
+            ck_obj = torch.load(args.ckpt, map_location="cpu")
+            if isinstance(ck_obj, dict):
+                ckpt_manifest = ck_obj.get("manifest")
+            del ck_obj
+        except Exception:
+            pass
+    eval_manifest = build_run_manifest("eval_benchmarks", vars(args),
+                                       extra={"ckpt_sha256": ckpt_sha256, "ckpt_manifest": ckpt_manifest})
+    out = {"name": args.name, "mode": args.mode, "ckpt": args.ckpt, "ckpt_sha256": ckpt_sha256,
+           "model": args.model, "arch": run.arch,
+           "scorer_version": bs.SCORER_VERSION, "manifest": eval_manifest,
            "args": vars(args), "benches": res, "seconds": time.time() - t0,
            "peak_gib": torch.cuda.max_memory_allocated() / 1024 ** 3,
            "note": "统一无禁词贪心生成协议与官方 relaxed 计分；图片缩放到 ≤max_pixels"}
