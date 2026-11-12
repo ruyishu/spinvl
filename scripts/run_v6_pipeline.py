@@ -149,7 +149,6 @@ def train_tower_variant(gpu: str, tag: str, extra_flags: list, seed: int, gnd_w:
         PY, SCRIPTS / "train_final.py",
         "--arm", "ce",
         "--data", DATA_SPEC,
-        *SRC_ARGS,
         "--steps", "2400",
         "--bs", "8",
         "--seq", "256",
