@@ -1,0 +1,95 @@
+{
+  "timestamp": "2026-11-12 23:56:24",
+  "checks": {
+    "1_unified_generation_protocol": {
+      "passed": true,
+      "no_first_step_ban": true,
+      "no_custom_logits_processor": true
+    },
+    "2_chartqa_scorer": {
+      "passed": true,
+      "scorer_version": "clean_v6_official_relaxed_v1",
+      "rejects_implicit_div100": true,
+      "rejects_substring_no": true
+    },
+    "3_derangements": {
+      "passed": true,
+      "internal_val": {
+        "64": {
+          "same_image_pairs": 0,
+          "perm_sha1": "a3cb318724c95b3b2518afceb3ce0e0991c08db9"
+        },
+        "600": {
+          "same_image_pairs": 0,
+          "perm_sha1": "e26bf42eaf2d41c6c207950776de4c9bf54ebe70"
+        },
+        "4441": {
+          "same_image_pairs": 0,
+          "perm_sha1": "f26f7e178c290416eebffebc8856c41841def192"
+        }
+      },
+      "public_benchmarks_3seeds": {
+        "mmstar": {
+          "101": "c47e024761dfe267afc81ae56a30852e4ed0cdda",
+          "102": "ab4a51e2908c64938f2630203ee02d2cd5d3e956",
+          "103": "cdc1bd68f9b0c2d3fd38e7cd60ad30c16ba1f9e7"
+        },
+        "hallusion": {
+          "101": "654e137e261e405527c2ae821bd860c2f76e2630",
+          "102": "b7d2ac3c76f5719f2bacb99fd6905a61a813b896",
+          "103": "43317e9842b26df464c1949afdd9d7de82d05974"
+        },
+        "mathvista": {
+          "101": "2ed58ce3917f634d536d57d7d685ba4505d033ef",
+          "102": "19e4f4b8d3731219041697cc8264b73562dabbbe",
+          "103": "1dede0ba5da2ff09e80d844ee1987eb2d67a5bb6"
+        }
+      }
+    },
+    "4_unified_split": {
+      "passed": true,
+      "split_info": {
+        "train_rows": 39949,
+        "val_rows": 4441,
+        "train_groups": 35052,
+        "val_groups": 3906,
+        "group_overlap": 0,
+        "split_sha1": "37e5ca4eaabda43bbbf3c3f27b0a060a2d643f7c"
+      },
+      "val_1000_len": 1000,
+      "val_1000_sha1": "bfdedd6271c7f213ae150d1f2b83d8415eb11604"
+    },
+    "5_frozen_backbone_and_a1": {
+      "passed": true,
+      "backbone_tensors_checked": 310,
+      "changed_backbone_tensors": 0,
+      "a1_ca_only_vrmg_params": 23914240,
+      "a3_full_vrmg_params": 52414208,
+      "b2_rots_front_total_params": 56424448,
+      "b2_rots_static_only_params": 2396160
+    },
+    "6_text_bypass_bit_exact": {
+      "passed": true,
+      "max_abs_diff_before_vision": 0.0,
+      "max_abs_diff_after_vision": 0.0,
+      "max_abs_diff_with_vision": 29.0,
+      "bit_equal_before_and_after": true
+    }
+  },
+  "code_sha256": {
+    "src/vrmg.py": "beae9d8fff2c17784b0ad04a91194a7df377fabd930f3096aa33c034924bcdc6",
+    "src/front.py": "35e2aac172d2c3a75eb5f803831a8d8a222d923a53032eb0eabebcf6b01337b2",
+    "src/wrap.py": "d5418dfb7471b74a7027268855ab494e503b23f85af6f1158f11e42a9de80dea",
+    "src/imgdata.py": "217250902979e9c7f5abf175be392bab687bf1ce74467136bb377ea8eafe3d8b",
+    "scripts/bench_models.py": "31d5fec7bcd6d93434e6bc12ab83ab462bba30e9b6a55467809eeb674171e8e1",
+    "scripts/bench_score.py": "e3d620877dc94f6b8e78ecf75db3e863a9a64a33468c786c8a7b5515653ea9f1",
+    "scripts/eval_benchmarks.py": "d0252b1ed1d6a475a80cb1c0020dcecff1d7703e8db786a08a93a16a2ea68638",
+    "scripts/train_final.py": "c340557d8b1eb3c285fe9cb8b8ff2070f3426f3c89c66f53edef1ed5b68fdeb8",
+    "scripts/train_front.py": "167ea3511bf20e1dcc96c1c7e9b791926a3f634cd620f56e0066fb7986f04abf",
+    "scripts/train_joint.py": "8d7a87a36cb360504cb59e6b394e8285e42e4f31d2be98289ec62e8b420445a2",
+    "scripts/train_joint_opd.py": "6421e62b2cbfc5797b159f154e3e8a932b04030c45d44778e623ed5e1bb7f924",
+    "scripts/bench_efficiency.py": "f266da9b8a5609579e0e5a5bad93ce6b840683cb36cca01b31a9612ae56ffcd8"
+  },
+  "elapsed_seconds": 129.82886838912964,
+  "all_passed": true
+}

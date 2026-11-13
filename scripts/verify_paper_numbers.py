@@ -11,6 +11,7 @@ TEX_PATH = ROOT / "paper" / "sections" / "4_experiments.tex"
 BENCH = ROOT / "results" / "benchmarks"
 TLOG = ROOT / "results" / "train_logs"
 V5 = ROOT / "results" / "clean_v5"
+V6 = ROOT / "results" / "clean_v6"
 PRES = ROOT / "results" / "paper_results.json"
 
 
@@ -76,14 +77,14 @@ def parse_mean_std(cell_str: str):
 
 
 def main():
-    global ROOT, TEX_PATH, BENCH, TLOG, V5, PRES
+    global ROOT, TEX_PATH, BENCH, TLOG, V5, V6, PRES
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=pathlib.Path, default=ROOT)
     ap.add_argument("--tex", type=pathlib.Path, help="Verify a separate TeX copy against --root results")
     args = ap.parse_args()
     ROOT = args.root.resolve()
     TEX_PATH = args.tex.resolve() if args.tex else ROOT / "paper/sections/4_experiments.tex"
-    BENCH, TLOG, V5 = ROOT / "results/benchmarks", ROOT / "results/train_logs", ROOT / "results/clean_v5"
+    BENCH, TLOG, V5, V6 = ROOT / "results/benchmarks", ROOT / "results/train_logs", ROOT / "results/clean_v5", ROOT / "results/clean_v6"
     PRES = ROOT / "results/paper_results.json"
     tex_text = TEX_PATH.read_text(encoding="utf-8")
     checks = 0
@@ -292,39 +293,44 @@ def main():
         assert_rounded(f"TabBoundary:{name}", "g3", bs["g3"], cells[4], decimals=2)
         checks += 3
 
-    # 8. Table 8 (tab:grounding)
-    t7_rows = extract_table_block(tex_text, "tab:grounding")[2:]
+    # 8. Table 8 (tab:grounding, clean_v6 44k strict-audit)
+    t7_rows = extract_table_block(tex_text, "tab:grounding")[1:]
     t7_files = [
-        ("Teacher v5", None, V5 / "eval" / "re_teacher_qwen3vl8b.json", V5 / "eval" / "re_teacher_qwen3vl8b_shuffle.json"),
-        ("LLaVA v5", None, V5 / "eval" / "v5_proj_llava.json", V5 / "eval" / "v5_proj_llava_shuffle.json"),
-        ("ROSE v5", V5 / "v5_tower_rose.json", V5 / "eval" / "v5_tower_rose.json", V5 / "eval" / "v5_tower_rose_shuffle.json"),
-        ("SpinVL-Tower v5", V5 / "v5_tower_spinvl_full.json", V5 / "eval" / "v5_tower_spinvl_full.json", V5 / "eval" / "v5_tower_spinvl_full_shuffle.json"),
-        ("K=0 v5", V5 / "v5_free_none_K0_joint.json", V5 / "eval" / "v5_free_none_K0.json", V5 / "eval" / "v5_free_none_K0_shuffle.json"),
-        ("VoRA v5", V5 / "v5_free_lora_K4_joint.json", V5 / "eval" / "v5_free_lora_K4.json", V5 / "eval" / "v5_free_lora_K4_shuffle.json"),
-        ("SpinVL-Free v5", V5 / "v5_free_rots_K4_joint.json", V5 / "eval" / "v5_free_rots_K4_joint.json", V5 / "eval" / "v5_free_rots_K4_joint_shuffle.json"),
-        ("SpinVL-Free+JSD v5", V5 / "v5_free_opd_jsd.json", V5 / "eval" / "v5_free_opd_jsd.json", V5 / "eval" / "v5_free_opd_jsd_shuffle.json"),
+        ("LLaVA-Proj v6", None, V6 / "eval" / "v6_proj_llava_s0.json"),
+        ("ROSE v6", V6 / "v6_tower_A0_rose_s0.json", V6 / "eval" / "v6_tower_A0_rose_s0.json"),
+        ("CA-Only v6", V6 / "v6_tower_A1_caonly_s0.json", V6 / "eval" / "v6_tower_A1_caonly_s0.json"),
+        ("R1 srot v6", V6 / "v6_tower_R1_srot_s0.json", V6 / "eval" / "v6_tower_R1_srot_s0.json"),
+        ("R2 mf v6", V6 / "v6_tower_R2_mf_noqc_s0.json", V6 / "eval" / "v6_tower_R2_mf_noqc_s0.json"),
+        ("R3 mf+qc v6", V6 / "v6_tower_R3_mf_qc_rot_s0.json", V6 / "eval" / "v6_tower_R3_mf_qc_rot_s0.json"),
+        ("S0 K=0 v6", V6 / "v6_free_S0_none_mf_joint_s0.json", V6 / "eval" / "v6_free_S0_none_mf_s0.json"),
+        ("S1 LoRA v6", V6 / "v6_free_S1_lora_mf_joint_s0.json", V6 / "eval" / "v6_free_S1_lora_mf_s0.json"),
+        ("F2 rots+CA v6", V6 / "v6_free_F2_rots_ca_joint_s0.json", V6 / "eval" / "v6_free_F2_rots_ca_s0.json"),
+        ("S2 rots+mf v6", V6 / "v6_free_S2_rots_mf_joint_s0.json", V6 / "eval" / "v6_free_S2_rots_mf_s0.json"),
+        ("M0 cont CE v6", V6 / "v6_opd_M0_cont_ce_s0.json", V6 / "eval" / "v6_opd_M0_cont_ce_s0.json"),
+        ("M1 OffKD v6", V6 / "v6_opd_M1_offkd_s0.json", V6 / "eval" / "v6_opd_M1_offkd_s0.json"),
+        ("M2 Fwd-KL v6", V6 / "v6_opd_M2_fwdkl_s0.json", V6 / "eval" / "v6_opd_M2_fwdkl_s0.json"),
+        ("M3 JSD v6", V6 / "v6_opd_M3_jsd_s0.json", V6 / "eval" / "v6_opd_M3_jsd_s0.json"),
     ]
     assert len(t7_rows) == len(t7_files)
-    for cells, (name, tp, rp, sp) in zip(t7_rows, t7_files):
+    for cells, (name, tp, bp) in zip(t7_rows, t7_files):
         if tp is not None:
             td = json.loads(tp.read_text(encoding="utf-8"))
-            ev = td.get("val") or td.get("eval", {}).get("front") or td.get("eval")
-            assert_rounded(f"TabGrounding:{name}", "gap", ev["gap"], cells[1], decimals=3)
+            if "val" in td:
+                ev, em_v = td["val"], td["val"]["em"] * 100
+            elif "eval" in td and "front" in td["eval"]:
+                ev = td["eval"]["front"]
+                em_v = td.get("em_front", {}).get("em", ev.get("em", 0)) * 100
+            else:
+                ev, em_v = td["eval"], td["eval"]["em"] * 100
+            ce_s, em_s = cells[1].split("/")
+            assert_rounded(f"TabGrounding:{name}", "ce", ev["correct"], ce_s, decimals=3)
+            assert_rounded(f"TabGrounding:{name}", "em", em_v, em_s, decimals=1)
+            assert_rounded(f"TabGrounding:{name}", "gap", ev["gap"], cells[2], decimals=3)
+            checks += 3
+        b = load_b(bp)
+        for idx, k in zip((3, 4, 5, 6, 7, 8, 9), ("mm", "ha", "mv", "cq", "mc2", "core3", "avg6")):
+            assert_rounded(f"TabGrounding:{name}", k, b[k], cells[idx], decimals=2)
             checks += 1
-        sr = load_b(rp)
-        ss = load_b(sp)
-        mm_r, mm_s = cells[2].split("/")
-        ha_r, ha_s = cells[3].split("/")
-        mv_r, mv_s = cells[4].split("/")
-        assert_rounded(f"TabGrounding:{name}", "mm_r", sr["mm"], mm_r, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "mm_s", ss["mm"], mm_s, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "ha_r", sr["ha"], ha_r, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "ha_s", ss["ha"], ha_s, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "mv_r", sr["mv"], mv_r, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "mv_s", ss["mv"], mv_s, decimals=1)
-        assert_rounded(f"TabGrounding:{name}", "mc2", sr["mc2"], cells[5], decimals=2)
-        assert_rounded(f"TabGrounding:{name}", "core3", sr["core3"], cells[6], decimals=2)
-        checks += 8
 
     print(f"ALL_8_TABLES_TEX_VERIFIED_OK: {checks} cells/stats across all 8 tables in {TEX_PATH.name} parsed and verified against JSONs!")
 

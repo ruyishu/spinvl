@@ -23,14 +23,14 @@ the ceiling, at the cost of the lossless property.
 
 \emph{Training scale and zero-shot visual sensitivity.} Our mixtures contain
 $21$k--$44$k short-answer items and a single teacher; we have not studied
-web-scale pretraining ($10^7$--$10^8$ pairs) of the rotation generators. While
-\modelname{} yields a clear visual grounding gap on held-out validation images
-($1.37$--$1.87$ nats) and positive real-over-shuffled gains on HallusionBench ($+3.05$
-points) and MathVista ($+1.50$ to $+4.10$ points), real-minus-shuffled deltas on
+web-scale pretraining ($10^7$--$10^8$ pairs) of the rotation generators. On the
+$44$k debiased mixture, bounded multi-frequency rotation achieves $41.71\%$ MC2
+and $35.44\%$ Core3 (\modelname-Tower) and $20.08\%$ Avg6 / $24.90\%$ MathVista
+(\modelname-Free + Step~2 distillation), while real-minus-shuffled deltas on
 MMStar remain small across all frozen-backbone student models---including
-full-token LLaVA-Proj---at this data scale (Tab.~\ref{tab:grounding}). Scaling
-the rotation generators to multi-million pretraining corpora is therefore an
-important next step.
+full-token LLaVA-Proj ($28.60\%$ vs.\ $28.00\%$)---at this data scale
+(Tab.~\ref{tab:grounding}). Scaling the rotation generators to multi-million
+pretraining corpora is therefore an important next step.
 
 \emph{Two-phase inference.} The tower-free variant runs a bidirectional pass
 over patches and then a causal pass over text, which prevents a single fused

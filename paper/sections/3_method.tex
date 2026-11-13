@@ -103,21 +103,29 @@ C_\ell = \mathrm{MHA}\big(Q_\ell,\; W_k^{(\ell)}V,\; W_v^{(\ell)}V\big),
 \label{eq:ctx}
 \end{equation}
 where $\theta_\ell\in\mathbb{R}^{N_b\times b(b-1)/2}$ collects the strictly
-lower-triangular entries of the skew-symmetric blocks. The rotation is
+lower-triangular entries of the skew-symmetric blocks. To prevent large-angle
+rotations from distorting the frozen LLM's post-attention head-concatenation
+($o$) and high-dimensional post-SwiGLU ($\text{down}$) manifolds during
+autoregressive decoding, we apply dynamic rotations to the five residual-stream
+entry projections ($q,k,v,\text{gate},\text{up}$) and bound the skew-symmetric
+generator in the Lie algebra $\mathfrak{so}(b)$ with radius
+$\tau_{\mathrm{rot}}{=}0.12$:
 \begin{equation}
-A_r = \mathrm{tril}(\theta_{\ell,r}) - \mathrm{tril}(\theta_{\ell,r})^{\top},
+A_r = \frac{\tau_{\mathrm{rot}}}{\sqrt{b}}\Big(\mathrm{tril}(\tanh\theta_{\ell,r}) - \mathrm{tril}(\tanh\theta_{\ell,r})^{\top}\Big),
 \qquad
 R_{\ell,r} = (I-A_r)^{-1}(I+A_r),
 \label{eq:cayley}
 \end{equation}
-and a rotated projection computes
+which preserves exact orthogonality ($R_{\ell,r}^{\top}R_{\ell,r}=I$) while
+bounding $\|R_{\ell,r}-I\|_2$ and saving the $6144$-dimensional $\text{down}$
+projection rotation cost. A rotated projection computes
 \begin{equation}
 y = \big(x\,R_{\ell}\big)W^{\top}+b,
 \qquad
 R_\ell = \mathrm{blkdiag}(R_{\ell,1},\dots,R_{\ell,N_b}),
 \label{eq:rotlin}
 \end{equation}
-with $x$ split into $N_b$ channel blocks. All seven projections of a layer
+with $x$ split into $N_b$ channel blocks. All modulated projections of a layer
 share the same visual context, which is computed once and cached for the whole
 forward pass, so generation pays for the rotation generator once per layer
 rather than once per step.

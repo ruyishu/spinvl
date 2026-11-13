@@ -1,0 +1,222 @@
+{
+ "args": {
+  "arm": "ce",
+  "data": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/shard*.meta.pt",
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "layers": "0,4,8,12,16,20,24",
+  "block": 64,
+  "multifreq": true,
+  "tokrot": false,
+  "hybrid": true,
+  "prompt_alpha": 1.0,
+  "hyb_bound": 0.0,
+  "qcond": true,
+  "direct_hyb": true,
+  "no_rot": false,
+  "rot_bound": 0.12,
+  "query_dim": 256,
+  "bs": 8,
+  "seq": 256,
+  "steps": 800,
+  "lr": 0.0002,
+  "kd_weight": 0.5,
+  "kd_temp": 2.0,
+  "rel_weight": 0.1,
+  "gnd_weight": 0.0,
+  "gnd_margin": 0.75,
+  "eval_every": 400,
+  "limit": 0,
+  "seed": 0,
+  "student_layers": "6,13,20,27",
+  "em_n": 1000,
+  "test_data": "",
+  "test_em_n": 150,
+  "init_ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_A1_caonly_s0_pt.pt",
+  "result_json": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_R3_mf_qc_rot_s0.json",
+  "log": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_R3_mf_qc_rot_s0.log"
+ },
+ "split_info": {
+  "train_rows": 39949,
+  "val_rows": 4441,
+  "train_groups": 35052,
+  "val_groups": 3906,
+  "group_overlap": 0,
+  "split_sha1": "37e5ca4eaabda43bbbf3c3f27b0a060a2d643f7c"
+ },
+ "manifest": {
+  "schema_version": 3,
+  "stage": "tower_train",
+  "timestamp_utc": "2026-11-13T04:13:48Z",
+  "args": {
+   "arm": "ce",
+   "data": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/shard*.meta.pt",
+   "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+   "layers": "0,4,8,12,16,20,24",
+   "block": 64,
+   "multifreq": true,
+   "tokrot": false,
+   "hybrid": true,
+   "prompt_alpha": 1.0,
+   "hyb_bound": 0.0,
+   "qcond": true,
+   "direct_hyb": true,
+   "no_rot": false,
+   "rot_bound": 0.12,
+   "query_dim": 256,
+   "bs": 8,
+   "seq": 256,
+   "steps": 800,
+   "lr": 0.0002,
+   "kd_weight": 0.5,
+   "kd_temp": 2.0,
+   "rel_weight": 0.1,
+   "gnd_weight": 0.0,
+   "gnd_margin": 0.75,
+   "eval_every": 400,
+   "limit": 0,
+   "seed": 0,
+   "student_layers": "6,13,20,27",
+   "em_n": 1000,
+   "test_data": "",
+   "test_em_n": 150,
+   "init_ckpt": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_A1_caonly_s0_pt.pt",
+   "result_json": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_R3_mf_qc_rot_s0.json",
+   "log": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_tower_R3_mf_qc_rot_s0.log"
+  },
+  "prompt_protocol_version": "clean_v6_unified_greedy_max24_no_ban_v2",
+  "scorer_version": "clean_v6_official_relaxed_v2",
+  "code_sha256": {
+   "src/vrmg.py": "4adc4e39169c88bbe655359450f62f490d857adc61ad67c1c541348c9eccfcd5",
+   "src/front.py": "35e2aac172d2c3a75eb5f803831a8d8a222d923a53032eb0eabebcf6b01337b2",
+   "src/wrap.py": "5bc99e2344c8b0e951238a91a4d1e65c6faf70f98d671e22e697d0cd16fa08bb",
+   "src/imgdata.py": "217250902979e9c7f5abf175be392bab687bf1ce74467136bb377ea8eafe3d8b",
+   "src/provenance.py": "b14c57828190bbad9e7fa2bd51034892ee78c814ded0098f7c8d7d1d567f23c2",
+   "src/flops.py": "a19c6a08214768e8bd1099d1e6a165d58100fbaca6bcabaeafa5101b2d640194",
+   "scripts/bench_data.py": "ca83a7dcdb4e11dc861c03d9d6065ce8955fcf0c50c55c67dcfdfb48c6390fa4",
+   "scripts/bench_models.py": "144dedaa024daa670b2b6a3640019cd7878e8798e518ea8b87e17741ccbadfdd",
+   "scripts/bench_score.py": "2b46c095b531923cf95412f835d92d12e1a7950144daaa030d35eb0a0b57474e",
+   "scripts/eval_benchmarks.py": "7f95a699cd95edaf04fc6df4dc9d761549aaeb59e6a63530d576fbc77fe7177f",
+   "scripts/train_final.py": "3f3bdbcd97be5f39d6fd309d4a57a908e8dd597bc7d8cd661d6746bf45e4a2ec",
+   "scripts/train_front.py": "cd1549e572eb6ff281f443c03b80bb1fe895c33438b2e5f75cff6cd6c9d9838d",
+   "scripts/train_joint.py": "2deb1c1cfb34f07d96870418c5881f516d1481fe37576e2f6bd494d0751aa19a",
+   "scripts/train_opd.py": "57edb73baa7be2ae57152dd27a09b1e0b938fd229a1b966b6978301d95729cd1",
+   "scripts/train_joint_opd.py": "7dd01e3aa5b70ccccec11cffb3927faa7c4df5a3a2be31db3a3918c853fd7401",
+   "scripts/bench_efficiency.py": "e02b7369fa30967409c81bc68b22ac01980e10a70e6f15c6bee649de1e62910a"
+  },
+  "ckpt_sha256": {
+   "init_ckpt": "c05a84baa555efa62f06ff4f5fb6e59b81ae01579ff97b3f134e47417464931b"
+  },
+  "data_fingerprint": {
+   "sha256": "0a0fb10882e2ea63c6773e6d8f0295507bc3df7ab14f4791e311674b61856bd1",
+   "file_count": 38,
+   "files_manifest": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/.fingerprint_cache/data-0a0fb10882e2ea63c6773e6d8f0295507bc3df7ab14f4791e311674b61856bd1.json",
+   "files_manifest_sha256": "0a0fb10882e2ea63c6773e6d8f0295507bc3df7ab14f4791e311674b61856bd1"
+  },
+  "model_fingerprints": {
+   "model": {
+    "identifier": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+    "sha256": "10acc10c00181a8adeed5f9badaeb935b16d9037a41a2356ec369882f67741e1",
+    "files": [
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/config.json",
+      "size": 726,
+      "sha256": "1ddb5b89ebc90dcb417a45c213d818577e65976454d29385c8f6140771d95197"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/generation_config.json",
+      "size": 239,
+      "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/merges.txt",
+      "size": 1671853,
+      "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/model-00001-of-00002.safetensors",
+      "size": 3441185608,
+      "sha256": "169ad53ec313c3a34b06c0809216e4fc072cce444a5d4ff2b59690d064130ed5"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/model-00002-of-00002.safetensors",
+      "size": 622329984,
+      "sha256": "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/model.safetensors.index.json",
+      "size": 25605,
+      "sha256": "0d660e94b165eb912669a5249dff44b83188c4777a07ddb9611fb78d91b0578d"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/tokenizer.json",
+      "size": 11422654,
+      "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/tokenizer_config.json",
+      "size": 9732,
+      "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"
+     },
+     {
+      "path": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B/vocab.json",
+      "size": 2776833,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+     }
+    ]
+   }
+  },
+  "inputs_captured_before_run": true,
+  "hash_cache_validation": "resolved_path,size,mtime_ns,ctime_ns,inode",
+  "split_info": {
+   "train_rows": 39949,
+   "val_rows": 4441,
+   "train_groups": 35052,
+   "val_groups": 3906,
+   "group_overlap": 0,
+   "split_sha1": "37e5ca4eaabda43bbbf3c3f27b0a060a2d643f7c"
+  },
+  "env": {
+   "python": "3.10.18",
+   "torch": "2.8.0+cu128",
+   "transformers": "4.57.1",
+   "cuda": "12.8",
+   "gpu": "NVIDIA L20"
+  },
+  "frozen_check": {
+   "frozen_verified": true,
+   "backbone_tensor_count": 310,
+   "changed_backbone_tensors": 0,
+   "backbone_sha1": "9fd419fa47e3f64a98a0a91689d7bce3ece342bf",
+   "backbone_hash_format": "sha1_raw_tensor_bytes_v1"
+  },
+  "val_em_sha1": "bfdedd6271c7f213ae150d1f2b83d8415eb11604",
+  "backbone_sha1_before": "9fd419fa47e3f64a98a0a91689d7bce3ece342bf"
+ },
+ "trainable_params": 52414208,
+ "frozen_check": {
+  "frozen_verified": true,
+  "backbone_tensor_count": 310,
+  "changed_backbone_tensors": 0,
+  "backbone_sha1": "9fd419fa47e3f64a98a0a91689d7bce3ece342bf",
+  "backbone_hash_format": "sha1_raw_tensor_bytes_v1"
+ },
+ "val": {
+  "correct": 1.1857364541506983,
+  "shuffled": 1.4155612946093619,
+  "no_image": 12.364037109924867,
+  "shuf_same_image_count": 0,
+  "shuf_perm_sha1": "f26f7e178c290416eebffebc8856c41841def192",
+  "gap": 0.22982484045866358,
+  "em": 0.395,
+  "stop_rate": 0.999,
+  "mean_len": 2.134,
+  "rep3_rate": 0.025,
+  "em_n": 1000,
+  "val_em_sha1": "bfdedd6271c7f213ae150d1f2b83d8415eb11604",
+  "tf_first": 0.5683404638594911,
+  "tf_full": 0.41454627336185546
+ },
+ "train_steps": 800,
+ "train_seconds": 868.808881521225,
+ "peak_gib": 16.620821952819824
+}

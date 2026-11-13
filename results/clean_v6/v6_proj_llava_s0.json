@@ -1,0 +1,40 @@
+{
+ "args": {
+  "data": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/shard*.meta.pt,/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/shard*.meta.pt",
+  "source": [
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix_v2/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/mix",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp_v2/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/open_supp",
+   "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/shard*.meta.pt|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp/manifest.jsonl|/data/ibu-bi-ai-share-disk/zk/project/rose-distill/data/nat_supp"
+  ],
+  "model": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-1.7B",
+  "teacher": "/data/ibu-bi-ai-share-disk/zk/model/Qwen3-VL-8B-Instruct",
+  "seq": 256,
+  "bs": 8,
+  "steps": 2400,
+  "lr": 0.0005,
+  "limit": 0,
+  "n_eval": 0,
+  "n_acc": 0,
+  "seed": 0,
+  "workers": 3,
+  "gnd_weight": 0.0,
+  "gnd_margin": 0.75,
+  "fast_feats": true,
+  "out": "/data/ibu-bi-ai-share-disk/zk/project/rose-distill/results/clean_v6/v6_proj_llava_s0"
+ },
+ "val": {
+  "correct": 1.1411027428057554,
+  "shuffled": 1.4013022004271583,
+  "no_image": 12.372808003597122,
+  "gap": 0.26019945762140284,
+  "tf_first": 0.5768970952488178,
+  "tf_full": 0.4258049988741274
+ },
+ "train_seconds": 1922.2890374660492,
+ "peak_gib": 13.618988990783691,
+ "baseline_kind": "external_vision_tower_token_concat",
+ "baseline_note": "带外部视觉塔的传统拼接强基线：挂 8B 老师的冻结视觉塔，经 MLP Projector 变成视觉 token 拼在文本前，视觉 token 全程进入 LLM 全部层；用来对比准确率与 FLOPs 开销，不是「拔掉视觉塔」的对照。",
+ "llm_layers_with_visual_tokens": 28,
+ "n_train": 39949,
+ "n_val": 4441
+}

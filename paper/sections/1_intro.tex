@@ -103,12 +103,16 @@ derangement and blank controls). Retraining the concatenation baseline on open
 chart and document questions leaves its character-level chart reading and OCR
 accuracy flat ($10.32\%$ and $1.10\%$), while our model stays in the low single
 digits; adding the same data doubles our geometry accuracy ($1.83\%\to3.83\%$).
-On our $44$k deduplicated and class-balanced mixture, \modelname-Tower{} expands
-the held-out validation visual grounding gap by $+53\%$ over single-frequency
-rotation ($1.37$ vs.\ $0.90$ nats) and yields $+3.05$ points of
-real-over-shuffled gain on HallusionBench ($+7.15$ over blank), while showing
-that zero-shot MMStar perturbations remain small across all frozen-backbone
-methods---including full-token LLaVA---at this data scale.
+On our $44$k deduplicated and class-balanced mixture under unified greedy
+decoding and a $100\%$ frozen backbone, tangent-bounded multi-frequency
+rotation lifts \modelname-Tower{} to $41.71\%$ MC2, $35.44\%$ Core3, and
+$20.18\%$ Avg6 (vs.\ $37.11\%/30.88\%/15.70\%$ for ROSE and
+$40.21\%/34.77\%/19.59\%$ for cross-attention alone), while combining our
+\texttt{rots} ($K{=}4$) frontend with bounded multi-frequency rotation and
+Step~2 distillation lifts encoder-free validation exact match from $26.4\%$ to
+$41.2\%$, reaches $20.08\%$ Avg6 and $35.32\%$ Core3 ($99.6\%$ of $44$k
+full-token LLaVA's $35.45\%$), and boosts MathVista to $24.90\%$ under
+forward-KL VL-OPD.
 
 Our contributions are:
 \begin{itemize}
