@@ -1,0 +1,51 @@
+scripts/run_v6_afternoon.py
+  s_2218750ca2fee0::t_2d70d8ca73be62 1-420
+src/vrmg.py
+  s_2218750ca2fee0::t_a638674cf647a4 22-23,36
+  s_2218750ca2fee0::t_f185d3119d8dec 313-314,316-317
+  s_2218750ca2fee0::t_f410b45f7a1bf0 73
+  s_2218750ca2fee0::t_23869e23d49d23 183-185,187-188,191
+scripts/train_opd.py
+  s_2218750ca2fee0::t_8b76c1ac383fb3 198
+  s_2218750ca2fee0::t_11efdb7dc15df0 259-260,267-268
+scripts/bench_models.py
+  s_2218750ca2fee0::t_0eba4affab7a5d 99-100
+  s_2218750ca2fee0::t_f0d48cac832d1f 86,90
+src/wrap.py
+  s_2218750ca2fee0::t_9966b7ffe0dc43 94,106
+scripts/train_final.py
+  s_a06a6877dd98f0::t_55c9e668680c6d 484-485
+  s_2218750ca2fee0::t_64acce37b82aef 442
+  s_2218750ca2fee0::t_be8b34eb859ef8 516-531
+scripts/train_joint_opd.py
+  s_2218750ca2fee0::t_354a7fbdf39059 75
+  s_2218750ca2fee0::t_e4df3f3b0fd398 127-128,136
+  s_2218750ca2fee0::t_1f7ba7e88a34c1 170-177
+scripts/train_joint.py
+  s_2218750ca2fee0::t_a9cbea9d09ee05 204
+  s_2218750ca2fee0::t_257f73099f447c 253-254,261-262,264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "c3ee241590cfd1640da5edb9d907b5fe8d63290e",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    },
+    "s_a06a6877dd98f0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_seglohrluy26",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
