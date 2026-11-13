@@ -260,7 +260,7 @@ def pipeline_b():
     pt_f2_s0 = run_joint_with_deep(gpu, "v6_free_F2_rots_ca", "rots", 4, f_rots_s0, a1_s0, ca_flags, seed=0, steps=1200)
     pt_s2_s0 = run_joint_with_deep(gpu, "v6_free_S2_rots_mf", "rots", 4, f_rots_s0, r3_s0, r3_flags, seed=0, steps=1200)
 
-    # 2. 跑 F0 (none K=0 + CA-Only, s0) 与 F1 (lora K=4 + CA-Only, s0)
+    # 2. 在 F0 (none K=0 + CA-Only, s0) 与 F1 (lora K=4 + CA-Only, s0)
     f_none_s0 = OUT / f"{f_map['none'][2]}_s0.pt"
     f_lora_s0 = OUT / f"{f_map['lora'][2]}_s0.pt"
     pt_f0_s0 = run_joint_with_deep(gpu, "v6_free_F0_none_ca", "none", 0, f_none_s0, a1_s0, ca_flags, seed=0, steps=1200)
@@ -270,13 +270,13 @@ def pipeline_b():
     pt_s0_s0 = run_joint_with_deep(gpu, "v6_free_S0_none_mf", "none", 0, f_none_s0, r3_s0, r3_flags, seed=0, steps=1200)
     pt_s1_s0 = run_joint_with_deep(gpu, "v6_free_S1_lora_mf", "lora", 4, f_lora_s0, r3_s0, r3_flags, seed=0, steps=1200)
 
-    # 4. 评测 seed 0 的 F0/F1/F2 与 S0/S1/S2
-    eval_model(gpu, "tower_free", str(pt_f2_s0), "v6_free_F2_rots_ca_s0", full_ctrl=True, with_fgen=True)
+    # 4. 优先评测 S2_s0, S0_s0, S1_s0 与 F2_s0, F0_s0, F1_s0
     eval_model(gpu, "tower_free", str(pt_s2_s0), "v6_free_S2_rots_mf_s0", full_ctrl=True, with_fgen=True)
-    eval_model(gpu, "tower_free", str(pt_f0_s0), "v6_free_F0_none_ca_s0", full_ctrl=True, with_fgen=True)
-    eval_model(gpu, "tower_free", str(pt_f1_s0), "v6_free_F1_lora_ca_s0", full_ctrl=True, with_fgen=True)
     eval_model(gpu, "tower_free", str(pt_s0_s0), "v6_free_S0_none_mf_s0", full_ctrl=True, with_fgen=True)
     eval_model(gpu, "tower_free", str(pt_s1_s0), "v6_free_S1_lora_mf_s0", full_ctrl=True, with_fgen=True)
+    eval_model(gpu, "tower_free", str(pt_f2_s0), "v6_free_F2_rots_ca_s0", full_ctrl=True, with_fgen=True)
+    eval_model(gpu, "tower_free", str(pt_f0_s0), "v6_free_F0_none_ca_s0", full_ctrl=True, with_fgen=True)
+    eval_model(gpu, "tower_free", str(pt_f1_s0), "v6_free_F1_lora_ca_s0", full_ctrl=True, with_fgen=True)
 
     # 5. 补齐 S0/S1/S2 与 F0/F1/F2 的 seed 1, 2
     for sd in (1, 2):
@@ -311,12 +311,12 @@ def run_opd_from_joint(gpu: str, out_tag: str, joint_ckpt: Path, kl_mode: str, k
         "--max-new", "24",
         "--min-new", "1",
         "--gen-temp", "0.3",
-        "--kd-temp", "1.5",
+        "--kd-temp", "1.0",
         "--kl-mode", kl_mode,
         "--kl-weight", str(kl_w),
-        "--ce-weight", "0.2",
-        "--feat-weight", "0.5",
-        "--lr-vrmg", "3e-5",
+        "--ce-weight", "1.0",
+        "--feat-weight", "1.0",
+        "--lr-vrmg", "2e-5",
         "--lr-front", "1.5e-5",
         "--n-eval", "600",
         "--n-acc", "150",
@@ -351,33 +351,20 @@ def pipeline_c():
             [EVAL_OUT / f"{name}.json"],
         )
 
-    # 1. 在 F2 (rots K=4 + CA-Only, s0) 上跑主梯度冻结 OPD 四组对照 (D0/D1/D2/D3)
-    f2_s0 = OUT / "v6_free_F2_rots_ca_joint_s0.pt"
-    ca_flags = ["--no-rot", "--hybrid", "--direct-hyb"]
-    d_specs = [
-        ("v6_opd_D0_cont_ce", "none", 0.0, False),
-        ("v6_opd_D1_offkd", "offkd", 2.0, False),
-        ("v6_opd_D2_fwdkl", "fwd", 2.0, True),
-        ("v6_opd_D3_jsd", "jsd", 2.0, True),
-    ]
-    for tag, kl_m, kl_w, fctrl in d_specs:
-        pt_d = run_opd_from_joint(gpu, tag, f2_s0, kl_m, kl_w, ca_flags, seed=0, steps=600)
-        eval_model(gpu, "tower_free", str(pt_d), f"{tag}_s0", full_ctrl=fctrl, with_fgen=True)
-
-    # 2. 在 S2 (rots K=4 + Bounded-MF-Rot R3, s0) 上跑全三 Idea 合体的主梯度冻结 OPD 四组对照 (M0/M1/M2/M3)
+    # 1. 第一优先：在 S2 (rots K=4 + Bounded-MF-Rot R3, s0，CE=1.155, EM=40.8%) 上跑全三 Idea 合体的冻结 OPD 四组对照 (M0/M1/M2/M3)
     s2_s0 = OUT / "v6_free_S2_rots_mf_joint_s0.pt"
     r3_flags = ["--rot-bound", "0.12", "--multifreq", "--qcond", "--hybrid", "--direct-hyb"]
     m_specs = [
         ("v6_opd_M0_cont_ce", "none", 0.0, False),
-        ("v6_opd_M1_offkd", "offkd", 2.0, False),
-        ("v6_opd_M2_fwdkl", "fwd", 2.0, True),
-        ("v6_opd_M3_jsd", "jsd", 2.0, True),
+        ("v6_opd_M1_offkd", "offkd", 0.35, False),
+        ("v6_opd_M2_fwdkl", "fwd", 0.35, True),
+        ("v6_opd_M3_jsd", "jsd", 0.35, True),
     ]
     for tag, kl_m, kl_w, fctrl in m_specs:
         pt_m = run_opd_from_joint(gpu, tag, s2_s0, kl_m, kl_w, r3_flags, seed=0, steps=600)
         eval_model(gpu, "tower_free", str(pt_m), f"{tag}_s0", full_ctrl=fctrl, with_fgen=True)
 
-    # 3. 对新主模型 S2_s0 与 R3_s0 测独立进程效率 v6_efficiency_bounded_K4.json
+    # 2. 对新主模型 S2_s0 与 R3_s0 测独立进程效率 v6_efficiency_bounded_K4.json
     r3_s0_pt = OUT / "v6_tower_R3_mf_qc_rot_s0_pt.pt"
     a0_s0_pt = OUT / "v6_tower_A0_rose_s0_pt.pt"
     proj_pt = OUT / "v6_proj_llava_s0.pt"

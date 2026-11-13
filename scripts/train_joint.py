@@ -310,7 +310,8 @@ def main():
         f_base = [p for p in fparams if id(p) not in static_ids]
         groups.append({"params": f_base, "lr": args.lr_front, "weight_decay": 0.01})
         if front.static is not None:
-            scale_ps = list(front.static.scale.parameters()) if hasattr(front.static, "scale") else []
+            scale_mod = getattr(front.static, "scale", None)
+            scale_ps = list(scale_mod.parameters()) if isinstance(scale_mod, nn.Module) else []
             scale_ids = {id(p) for p in scale_ps}
             s_rot_ps = [p for p in static_all if id(p) not in scale_ids]
             lr_st = max(args.lr_front * 2.5, 2.5e-4)
