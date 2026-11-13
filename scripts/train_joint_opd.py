@@ -168,7 +168,7 @@ def main():
     log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items() if isinstance(v, (int, float))))
 
     scale_mod = getattr(front.static, "scale", None) if front.static is not None else None
-    scale_ps = list(scale_mod.parameters()) if isinstance(scale_mod, nn.Module) else []
+    scale_ps = list(scale_mod.parameters()) if hasattr(scale_mod, "parameters") else []
     scale_ids = {id(p) for p in scale_ps}
     f_other = [p for p in fparams if id(p) not in scale_ids]
     opt_groups = [{"params": vparams, "lr": args.lr_vrmg, "weight_decay": 0.01},
