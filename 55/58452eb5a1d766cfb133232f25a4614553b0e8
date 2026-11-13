@@ -1,0 +1,25 @@
+scripts/train_joint.py
+  s_2218750ca2fee0::t_ca5383ad768961 313-314
+scripts/run_v6_afternoon.py
+  s_2218750ca2fee0::t_6fa945f162dc9b 263,273,277-279
+  s_2218750ca2fee0::t_e891c844d6bcd4 314,317-319
+  s_2218750ca2fee0::t_9283159d067b80 354,359-361,367
+scripts/train_joint_opd.py
+  s_2218750ca2fee0::t_60d77005e6e6b5 170-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "5558452eb5a1d766cfb133232f25a4614553b0e8",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
