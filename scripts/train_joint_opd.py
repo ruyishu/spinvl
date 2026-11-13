@@ -72,6 +72,7 @@ def main():
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
     ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
+    ap.add_argument("--rot-bound", type=float, default=0.0, help="李代数切空间有界正交旋转半径（>0 启用）")
     ap.add_argument("--lr-vrmg", type=float, default=2e-5)
     ap.add_argument("--lr-front", type=float, default=1e-5)
     ap.add_argument("--tune-backbone", action="store_true", help="已禁用：当前主线强制要求原始 LLM 全程冻结")
@@ -123,7 +124,8 @@ def main():
 
     pa = args.prompt_alpha if args.prompt_alpha != 1.0 else ja.get("prompt_alpha", a1.get("prompt_alpha", 1.0))
     hb = args.hyb_bound if args.hyb_bound > 0.0 else ja.get("hyb_bound", a1.get("hyb_bound", 0.0))
-    ja["prompt_alpha"], ja["hyb_bound"] = pa, hb
+    rb = args.rot_bound if args.rot_bound > 0.0 else float(ja.get("rot_bound", a1.get("rot_bound", 0.0)))
+    ja["prompt_alpha"], ja["hyb_bound"], ja["rot_bound"] = pa, hb, rb
     vrmgs, registry = attach_rotation(
         model, layers, block_size=a1["block"], visual_dim=data["vfeat"][0].shape[-1],
         query_dim=a1["query_dim"], wrap_extra=[l for l in range(K) if l not in layers],
@@ -131,6 +133,7 @@ def main():
         qcond=bool(args.qcond or ja.get("qcond", False) or a1.get("qcond", False)),
         direct_hyb=bool(args.direct_hyb or ja.get("direct_hyb", False) or a1.get("direct_hyb", False)),
         no_rot=bool(args.no_rot or ja.get("no_rot", False) or a1.get("no_rot", False)),
+        rot_bound=rb,
     )
     for m, sd in zip(vrmgs, jck["vrmg"]):
         m.load_state_dict(sd)
@@ -164,9 +167,14 @@ def main():
     result["init_eval"] = init_ev
     log("INIT[front v̂]: " + " ".join(f"{k}={v:.4f}" for k, v in init_ev.items() if isinstance(v, (int, float))))
 
-    opt = torch.optim.AdamW([{"params": vparams, "lr": args.lr_vrmg},
-                             {"params": fparams, "lr": args.lr_front}],
-                            weight_decay=0.01)
+    scale_ps = list(front.static.scale.parameters()) if (front.static is not None and hasattr(front.static, "scale")) else []
+    scale_ids = {id(p) for p in scale_ps}
+    f_other = [p for p in fparams if id(p) not in scale_ids]
+    opt_groups = [{"params": vparams, "lr": args.lr_vrmg, "weight_decay": 0.01},
+                  {"params": f_other, "lr": args.lr_front, "weight_decay": 0.01}]
+    if scale_ps:
+        opt_groups.append({"params": scale_ps, "lr": args.lr_front, "weight_decay": 0.0})
+    opt = torch.optim.AdamW(opt_groups, weight_decay=0.01)
     verify_frozen_backbone_and_optimizer(model, opt, all_params)
     base_lrs = [g["lr"] for g in opt.param_groups]
     collate_fn = tj.make_collate(data, paths, ip, tok, args.seq, False)

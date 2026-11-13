@@ -83,10 +83,11 @@ class Runner:
                   for f in ("multifreq", "tokrot", "hybrid", "qcond", "direct_hyb", "no_rot")}
             pa = float(prompt_alpha) if prompt_alpha is not None else float(ja.get("prompt_alpha", a1.get("prompt_alpha", 1.0)))
             hb = float(hyb_bound) if hyb_bound is not None else float(ja.get("hyb_bound", a1.get("hyb_bound", 0.0)))
+            rb = float(ja.get("rot_bound", a1.get("rot_bound", 0.0)))
             vrmgs, self.registry = attach_rotation(self.model, layers, block_size=a1["block"], visual_dim=self.vdim,
                                                    query_dim=a1["query_dim"],
                                                    wrap_extra=[l for l in range(K) if l not in layers],
-                                                   prompt_alpha=pa, hyb_bound=hb, **kw)
+                                                   prompt_alpha=pa, hyb_bound=hb, rot_bound=rb, **kw)
             assert len(vrmgs) == len(states), f"vrmg count mismatch: {len(vrmgs)} != {len(states)}"
             for m, sd in zip(vrmgs, states):
                 m.load_state_dict(sd)
@@ -95,7 +96,8 @@ class Runner:
             if ck.get("backbone"):
                 self.model.load_state_dict(ck["backbone"], strict=True)
             self.arch = {"layers": layers, "block": a1["block"], **kw, "front_mode": front_mode, "K": K,
-                         "prompt_alpha": pa, "hyb_bound": hb, "tuned_backbone": bool(ck.get("backbone"))}
+                         "prompt_alpha": pa, "hyb_bound": hb, "rot_bound": rb,
+                         "tuned_backbone": bool(ck.get("backbone"))}
             if mode == "tower":
                 self.vision = load_vision_tower(teacher, dev)
             else:

@@ -439,6 +439,7 @@ def main():
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
     ap.add_argument("--no-rot", action="store_true", help="A1 消融：旋转恒等映射 R=I，仅保留视觉 cross-attention")
+    ap.add_argument("--rot-bound", type=float, default=0.0, help="李代数切空间有界正交旋转半径（>0 启用，如 0.12）")
     ap.add_argument("--query-dim", type=int, default=256)
     ap.add_argument("--bs", type=int, default=8)
     ap.add_argument("--seq", type=int, default=160)
@@ -480,7 +481,8 @@ def main():
     vrmgs, registry = attach_rotation(model, layers, block_size=args.block, multifreq=args.multifreq, tokrot=args.tokrot, hybrid=args.hybrid,
                                       visual_dim=data["vfeat"][0].shape[-1], query_dim=args.query_dim,
                                       prompt_alpha=args.prompt_alpha, hyb_bound=args.hyb_bound,
-                                      qcond=args.qcond, direct_hyb=args.direct_hyb, no_rot=args.no_rot)
+                                      qcond=args.qcond, direct_hyb=args.direct_hyb, no_rot=args.no_rot,
+                                      rot_bound=args.rot_bound)
     if args.init_ckpt and os.path.exists(args.init_ckpt):
         ick = torch.load(args.init_ckpt, map_location=dev)
         for m, sd in zip(vrmgs, ick["state"]):
@@ -511,7 +513,22 @@ def main():
         hit = (gold[m] == top1[m]).float().mean().item()
         log(f"ALIGN_CHECK teacher_top1_hit={hit:.3f} on {int(m.sum())} tokens")
 
-    opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.01)
+    if args.rot_bound > 0.0:
+        ca_params, rot_params = [], []
+        for m in vrmgs:
+            for n_p, p in m.named_parameters():
+                if n_p.startswith(("anc_", "hyb_")):
+                    ca_params.append(p)
+                else:
+                    rot_params.append(p)
+        if rel_head is not None:
+            ca_params.extend(list(rel_head.parameters()))
+        pgroups = [{"params": ca_params, "lr": args.lr}]
+        if rot_params:
+            pgroups.append({"params": rot_params, "lr": args.lr * 0.25})
+        opt = torch.optim.AdamW(pgroups, weight_decay=0.01)
+    else:
+        opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.01)
     pre_hashes, pre_bb_sha1 = snapshot_backbone_hashes(model)
     verify_frozen_backbone_and_optimizer(model, opt, params)
     sched = torch.optim.lr_scheduler.LambdaLR(

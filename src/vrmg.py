@@ -19,7 +19,8 @@ class LayerVRMG(nn.Module):
                  query_dim: int = 256, num_heads: int = 8, identity_init: bool = True,
                  multifreq: bool = False, tokrot: bool = False, hybrid: bool = False,
                  n_anchors: int = 16, prompt_alpha: float = 1.0, hyb_bound: float = 0.0,
-                 qcond: bool = False, direct_hyb: bool = False, no_rot: bool = False):
+                 qcond: bool = False, direct_hyb: bool = False, no_rot: bool = False,
+                 rot_bound: float = 0.0):
         super().__init__()
         self.proj_dims = dict(proj_dims)
         self.block_size = block_size
@@ -32,6 +33,7 @@ class LayerVRMG(nn.Module):
         self.qcond = bool(qcond) and not no_rot
         self.direct_hyb = bool(direct_hyb)
         self.no_rot = bool(no_rot)
+        self.rot_bound = float(rot_bound)
         self.d_model = proj_dims["q_proj"]
         self.qdim = query_dim
 
@@ -68,7 +70,7 @@ class LayerVRMG(nn.Module):
             self.n_mid = total - self.n_low - self.n_high
             self.gate = nn.Linear(proj_dims["q_proj"], total)
             nn.init.zeros_(self.gate.weight)
-            nn.init.zeros_(self.gate.bias)
+            nn.init.constant_(self.gate.bias, -2.0 if self.rot_bound > 0.0 else 0.0)
 
         if self.tokrot:
             nb_d = self.d_model // block_size
@@ -178,10 +180,15 @@ class LayerVRMG(nn.Module):
             vals = self.out(ctx)
 
             for name, nb in self.blocks.items():
+                if self.rot_bound > 0.0 and name in ("o_proj", "down_proj"):
+                    out[name] = None
+                    continue
                 seg = vals[:, self.offsets[name] : self.offsets[name] + nb]
+                if self.rot_bound > 0.0:
+                    seg = self.rot_bound * torch.tanh(seg) / (self.block_size ** 0.5)
                 out[name] = _cayley_blocks(seg, self.block_size)
             if self.multifreq:
-                out["gate"] = (self.gate, self.offsets)
+                out["gate"] = (self.gate, self.offsets, self.rot_bound > 0.0)
             if self.tokrot:
                 pe = self._pos_encoding(visual.shape[1], self.qdim, visual.device, base=500.0).to(visual.dtype)
                 tk = self.tok_k(visual) + pe
@@ -303,9 +310,11 @@ class RotatedLinear(nn.Module):
             xb = x.reshape(bsz, seq, nb, self.block_size)
             xr = torch.einsum("btrk,brkj->btrj", xb, R.to(x.dtype))
             if gate is not None:
-                gate_mod, offsets = gate
+                gate_mod, offsets = gate[0], gate[1]
+                soft_gate = gate[2] if len(gate) > 2 else False
                 if x.shape[-1] == gate_mod.in_features:
-                    g = (2 * torch.sigmoid(gate_mod(x.float()))).to(x.dtype)
+                    g_raw = torch.sigmoid(gate_mod(x.float()))
+                    g = (g_raw if soft_gate else (2.0 * g_raw)).to(x.dtype)
                     off = offsets[self.proj_name]
                     g = g[:, :, off : off + nb].unsqueeze(-1)
                     xr = xb + g * (xr - xb)

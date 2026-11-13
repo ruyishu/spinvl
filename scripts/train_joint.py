@@ -201,6 +201,7 @@ def main():
     ap.add_argument("--qcond", action="store_true", help="问题条件化旋转：把题目文本池化向量叠到 VRMG queries")
     ap.add_argument("--direct-hyb", action="store_true", help="hybrid 直接在 256 维对全图视觉 cell 做无损交叉注意力")
     ap.add_argument("--no-rot", action="store_true", help="旋转恒等映射 R=I，仅保留视觉 cross-attention")
+    ap.add_argument("--rot-bound", type=float, default=0.0, help="李代数切空间有界正交旋转半径（>0 启用）")
     ap.add_argument("--K", type=int, default=4)
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--model", default=f"{B}/zk/model/Qwen3-1.7B")
@@ -249,16 +250,18 @@ def main():
     K = 0 if args.front_mode == "none" else args.K
     pa = args.prompt_alpha if args.prompt_alpha != 1.0 else a1.get("prompt_alpha", 1.0)
     hb = args.hyb_bound if args.hyb_bound > 0.0 else a1.get("hyb_bound", 0.0)
-    args.prompt_alpha, args.hyb_bound = pa, hb
+    rb = args.rot_bound if args.rot_bound > 0.0 else float(a1.get("rot_bound", 0.0))
+    args.prompt_alpha, args.hyb_bound, args.rot_bound = pa, hb, rb
     vrmgs, registry = attach_rotation(model, layers, block_size=a1["block"], multifreq=args.multifreq or a1.get("multifreq", False), tokrot=args.tokrot or a1.get("tokrot", False), hybrid=args.hybrid or a1.get("hybrid", False),
                                       visual_dim=data["vfeat"][0].shape[-1], query_dim=a1["query_dim"],
                                       wrap_extra=[l for l in range(K) if l not in layers],
                                       prompt_alpha=pa, hyb_bound=hb,
                                       qcond=args.qcond or a1.get("qcond", False),
                                       direct_hyb=args.direct_hyb or a1.get("direct_hyb", False),
-                                      no_rot=args.no_rot or a1.get("no_rot", False))
+                                      no_rot=args.no_rot or (a1.get("no_rot", False) and rb == 0.0 and not args.multifreq),
+                                      rot_bound=rb)
     for m, sd in zip(vrmgs, ck["state"]):
-        m.load_state_dict(sd)
+        m.load_state_dict(sd, strict=False)
     front = PatchFront(model, K=K, mode=args.front_mode, vdim=data["vfeat"][0].shape[-1],
                        lora_rank=args.lora_rank).to(dev)
     if args.front_ckpt:
@@ -289,9 +292,34 @@ def main():
             rel_head = nn.Linear(model.config.hidden_size, data["hidden"][0][0].shape[-1], bias=False).to(dev)
             if ck.get("rel_head"):
                 rel_head.load_state_dict(ck["rel_head"])
-        groups = [{"params": vparams, "lr": args.lr_vrmg}, {"params": fparams, "lr": args.lr_front}]
+        groups = []
+        if args.rot_bound > 0.0:
+            ca_p, rot_p = [], []
+            for m in vrmgs:
+                for n_p, p in m.named_parameters():
+                    (ca_p if n_p.startswith(("anc_", "hyb_")) else rot_p).append(p)
+            if ca_p:
+                groups.append({"params": ca_p, "lr": args.lr_vrmg, "weight_decay": 0.01})
+            if rot_p:
+                groups.append({"params": rot_p, "lr": args.lr_vrmg * 0.25, "weight_decay": 0.01})
+        else:
+            groups.append({"params": vparams, "lr": args.lr_vrmg, "weight_decay": 0.01})
+
+        static_all = list(front.static.parameters()) if front.static is not None else []
+        static_ids = {id(p) for p in static_all}
+        f_base = [p for p in fparams if id(p) not in static_ids]
+        groups.append({"params": f_base, "lr": args.lr_front, "weight_decay": 0.01})
+        if front.static is not None:
+            scale_ps = list(front.static.scale.parameters()) if hasattr(front.static, "scale") else []
+            scale_ids = {id(p) for p in scale_ps}
+            s_rot_ps = [p for p in static_all if id(p) not in scale_ids]
+            lr_st = max(args.lr_front * 2.5, 2.5e-4)
+            if s_rot_ps:
+                groups.append({"params": s_rot_ps, "lr": lr_st, "weight_decay": 0.01})
+            if scale_ps:
+                groups.append({"params": scale_ps, "lr": lr_st, "weight_decay": 0.0})
         if rel_head is not None:
-            groups.append({"params": list(rel_head.parameters()), "lr": args.lr_vrmg})
+            groups.append({"params": list(rel_head.parameters()), "lr": args.lr_vrmg, "weight_decay": 0.01})
         opt = torch.optim.AdamW(groups, weight_decay=0.01)
         all_params = fparams + vparams + (list(rel_head.parameters()) if rel_head is not None else [])
         verify_frozen_backbone_and_optimizer(model, opt, all_params)

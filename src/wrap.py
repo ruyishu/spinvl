@@ -91,7 +91,7 @@ def attach_rotation(model: nn.Module, layer_indices, block_size: int = 64, visua
                     query_dim: int = 256, num_heads: int = 8, wrap_extra=(), multifreq: bool = False,
                     tokrot: bool = False, hybrid: bool = False, prompt_alpha: float = 1.0,
                     hyb_bound: float = 0.0, qcond: bool = False, direct_hyb: bool = False,
-                    no_rot: bool = False):
+                    no_rot: bool = False, rot_bound: float = 0.0):
     layers = model.model.layers
     modules, registry = [], {}
     for li in layer_indices:
@@ -103,7 +103,7 @@ def attach_rotation(model: nn.Module, layer_indices, block_size: int = 64, visua
                          query_dim=query_dim, num_heads=num_heads, multifreq=multifreq,
                          tokrot=tokrot, hybrid=hybrid, prompt_alpha=prompt_alpha,
                          hyb_bound=hyb_bound, qcond=qcond, direct_hyb=direct_hyb,
-                         no_rot=no_rot).to(dev, dtype=torch.float32)
+                         no_rot=no_rot, rot_bound=rot_bound).to(dev, dtype=torch.float32)
         registry[li] = vrmg
         modules.append(vrmg)
         _wrap_layer(layer, li, block_size)
