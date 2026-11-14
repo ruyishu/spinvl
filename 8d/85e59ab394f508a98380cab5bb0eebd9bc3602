@@ -1,0 +1,22 @@
+verify.md
+  s_2218750ca2fee0::t_9a9923253dfbb0 46
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_424b10ede7f165 325-330,337
+  s_2218750ca2fee0::t_b554d3c3af58fa 154-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "8d85e59ab394f508a98380cab5bb0eebd9bc3602",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-hydrogen"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
