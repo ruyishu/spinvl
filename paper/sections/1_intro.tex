@@ -1,132 +1,120 @@
 \section{Introduction}
-\label{sec:intro}
+\label{sec:introduction}
 
 \begin{figure*}[t]
-\centering
-\includegraphics[width=0.98\textwidth]{fig_architecture.png}
-\caption{\textbf{Overview of \modelname.} A completely frozen pure-text LLM is
-turned into a VLM without any visual token inside the deeper backbone.
-\emph{Step~1 (dual-tier orthogonal rotation):} the student's own first
-$K{=}4$ layers act as a built-in vision encoder with static Cayley rotation
-and channel scaling; all image tokens are discarded after layer $K$, and a
-compact cell feature drives dynamic block-diagonal rotations in the remaining
-layers. \emph{Step~2 (online policy distillation):} the student samples its
-own trajectories and is supervised token-by-token by a stronger VLM, which
-removes the exposure bias of teacher-forced training. The text pathway is
-never modified, so pure-text behaviour is bit-exact.}
-\label{fig:arch}
+    \centering
+    \includegraphics[width=\textwidth]{figures/spinvl_teaser_final.pdf}
+    \caption{\textbf{Visual adaptation strategies and their trade-offs.}
+    \textbf{(a)} LLaVA-style models require an external vision tower and
+    incur additional computation from deep visual tokens.
+    \textbf{(b)} ROSE (left) avoids deep visual tokens but retains the
+    tower. VoRA (right) removes the tower but retains deep visual tokens.
+    Merging its visual adapters can also degrade text-only capabilities.
+    \textbf{(c)} \modelname{} requires no external vision tower at inference,
+    keeps visual tokens out of deeper self-attention, and preserves the
+    LLM's original text-only computation and capabilities.}
+    \label{fig:teaser}
 \end{figure*}
 
-Feeding images to a language model is usually done by concatenation: a vision
-encoder, often a full ViT with hundreds of millions of parameters, turns the
-image into a sequence of tokens that is prepended to the text and propagated
-through every layer of the LLM~\citep{liu2023llava,liu2024improved}. This
-recipe is simple and effective, but it couples image resolution to the cost of
-the language model. At $4096$ patches, a $1.7$B student with $28$ layers
-spends $9.85$ TFLOPs per forward pass, an order of magnitude more than the
-text-only model would; the KV cache grows with the same factor. The usual
-remedy, fine-tuning the backbone on image-text pairs, trades away a property
-that is expensive to recover: the instruction-following and mathematical
-ability of the original model.
+Large language models (LLMs) have developed strong instruction-following
+and reasoning capabilities~\citep{grattafiori2024llama3,yang2025qwen3}.
+Extending these capabilities to visual inputs has enabled vision-language
+models (VLMs) to interpret images and answer visually grounded
+questions~\citep{alayrac2022flamingo,liu2023llava,bai2025qwen25vl}.
+Reliable visual understanding requires both global semantic context and
+local evidence, particularly for distinguishing visual facts from
+language priors and reasoning about
+diagrams~\citep{guan2024hallusionbench,lu2024mathvista}.
+For an existing text LLM, the practical goal is therefore to acquire
+these visual capabilities with modest inference overhead while retaining
+its original text-only behavior.
 
-An appealing alternative is to modulate weights instead of extending the
-context. Rotation-based injection~\citep{rose2025} keeps the backbone free of
-visual tokens by mapping visual features to block-diagonal orthogonal matrices
-that rotate the inputs of linear projections. It inherits the text model
-untouched and removes the quadratic cost of long visual sequences. Three
-problems remain. First, the method still requires an external vision tower,
-which is exactly the component one would like to delete when deploying a
-single frozen LLM. Second, images are pooled into one static rotation, so
-spatial detail is lost and the model cannot revisit a region. Third, the
-model is trained with teacher forcing on ground-truth answers; at inference
-time it must consume its own prefixes, and small early errors compound---we
-observe degenerate repetitions and missing end-of-sequence tokens.
+Existing visual adaptation methods follow three representative designs.
+The first combines external visual encoding with token concatenation,
+projecting image features into the language embedding space and jointly
+processing them with text (Figure~\ref{fig:teaser}(a)).
+Visual alignment and instruction tuning adapt
+the connector and the language backbone using multimodal
+data~\citep{liu2023llava,liu2024improved,bai2025qwen25vl}.
+Lightweight connectors and token reduction methods further reduce the
+visual sequence through learned querying, locality-aware projection,
+or pruning~\citep{li2023blip2,cha2024honeybee,chen2024fastv}.
+The second injects visual information in parameter space.
+ROSE~\citep{rose2025} converts externally encoded image features into
+orthogonal rotations that condition language projections without
+appending visual tokens to their self-attention sequences
+(Figure~\ref{fig:teaser}(b), left).
+The third internalizes visual encoding within the language stack.
+EVE~\citep{diao2024eve} trains a decoder to process images and text
+directly, while VoRA~\citep{vora2025} equips shallow LLM layers with
+low-rank adapters~\citep{hu2021lora} for visual feature extraction
+(Figure~\ref{fig:teaser}(b), right).
 
-A parallel line of work replaces the vision tower with the LLM's own early
-layers~\citep{vora2025}. This removes the tower but keeps the visual tokens
-alive: they travel through all remaining layers, so no compute is saved, and
-merging the resulting low-rank adapters into the backbone destroys text
-reasoning (GSM8K drops from $70.4\%$ to $0.0\%$ in our controlled experiment).
+Each direction leaves unresolved challenges.
+Token-concatenation methods depend on an external vision tower and retain
+visual tokens in deeper language layers, where even compressed or pruned
+sequences incur additional computation and KV-cache
+storage~\citep{liu2023llava,chen2024fastv}.
+Rotation-based injection avoids deep visual sequences, but ROSE still
+requires an external vision encoder to supply its conditioning
+features~\citep{rose2025}.
+Built-in encoding methods such as VoRA remove the external vision tower
+but still retain visual tokens in deeper self-attention~\citep{vora2025}.
+Moreover, adapting shared language layers can compromise the original
+text behavior: updating shared parameters or permanently merging visual
+adapters changes the computation used for text-only
+inputs~\citep{diao2024eve,vora2025}.
+These limitations motivate a unified question:
 
-This paper asks whether one can have all three properties at once: no
-external vision tower, no visual token in the deeper backbone, and intact text
-ability. \modelname{} answers affirmatively with a two-step framework
-(Fig.~\ref{fig:arch}).
+\emph{Can a pretrained text LLM acquire visual understanding with no
+external vision tower at inference, no visual tokens in deeper
+self-attention, and exact preservation of its original text-only
+computation?}
 
-\textbf{Step~1: dual-tier orthogonal rotation.} We distinguish two tiers of
-adaptation. In the shallow tier, the student's first $K$ layers are
-repurposed as a vision encoder using \emph{static} orthogonal rotation
-combined with a channel-wise diagonal scaling, which preserves angular
-geometry yet, unlike a pure rotation, can rescale singular values. Only
-$2.4$M parameters are involved. After layer $K$ every image token is dropped
-and a compact set of cell features remains. In the deep tier, those features
-generate \emph{dynamic} block-diagonal rotations for the remaining frozen
-layers. We propose two complementary generators: a multi-frequency variant
-that splits rotation blocks into low-, mid-, and high-frequency bands with
-RoPE-style positional encodings, and a hybrid variant that adds a lightweight
-cross-attention over a handful of spatial anchors. The two target different
-abilities---multi-step diagram reasoning versus fine-grained perception---and
-we report both.
+To meet these requirements, we present
+\textbf{Spin Vision-Language Adaptation (\modelname)} (Figure~\ref{fig:teaser}(c)), a dual-tier
+framework coupling built-in visual encoding with spatially aware
+modulation of frozen language layers.
+Specifically, \textbf{Rotational Visual Encoding (RVE)} reuses the LLM's
+frozen shallow layers through static rotations and channel scaling to
+extract visual features, eliminating the need for an external vision
+tower at inference. Visual tokens stop at this shallow interface.
+Building on the resulting features,
+\textbf{Spatially Aware Visual Modulation (SAVM)} combines bounded,
+image- and question-conditioned multi-frequency rotations with spatial
+retrieval, providing global context and local evidence without extending
+deeper self-attention sequences.
+For text-only inputs, bypassing visual adaptation recovers the original
+LLM computation, thereby preserving its text-only capabilities.
+Training this visual interface only on ground-truth prefixes, however,
+creates a mismatch with autoregressive
+inference~\citep{bengio2015scheduled}.
+Building on on-policy language-model
+distillation~\citep{agarwal2024gkd,gu2024minillm}, we introduce
+\textbf{Vision-Language On-Policy Distillation (VL-OPD)}, which aligns
+teacher and student distributions along student-generated trajectories
+using token-level forward KL anchored by ground-truth supervision.
+Extensive controlled experiments demonstrate competitive perception
+and hallucination detection with unchanged text-only behavior, while
+reducing FLOPs by up to 74.2\% at high resolution relative to a matched
+token-concatenation baseline.
+Across student configurations, VL-OPD improves free-form generation
+accuracy by up to 9.9\% in absolute terms.
 
-Because rotations are applied through a context-local wrapper, the text
-pathway is untouched: with the vision branch switched off the model is
-bit-identical to the original LLM ($70.4\%$ GSM8K, $71.4\%$ ARC-C). This is
-not true for additive adapters or for permanently merged rotations, whose text
-accuracy collapses.
-
-\textbf{Step~2: online policy distillation.} Offline teacher forcing trains
-the model only on ground-truth prefixes. We therefore let the student roll out
-its own answers and ask a stronger VLM to score those trajectories token by
-token, anchored by a gold cross-entropy term. Five hundred steps suffice to
-raise $0.6$B free-form generation by $+4.7$ to $+9.9$ points across benchmarks,
-lift $1.7$B tower-free perception and anti-hallucination on the base mixture from
-$40.21\%$ to $42.46\%$, and keep end-of-sequence termination at $87\%$--$99\%$
-versus $59\%$ for mode-seeking reverse KL.
-
-\textbf{Controlled evidence.} All models in our comparison are grouped by exact
-training mixture ($21$k base, $28$k +open, and a $44$k deduplicated,
-label-balanced mixture) and evaluated at the same seed ($s{=}0$) and resolution
-($392{\times}392$); the token-concatenation baseline is retrained by us on each
-mixture rather than quoted. On the $21$k base mixture, \modelname-Tower{}
-improves the average of perception and anti-hallucination (MC2) from $41.35\%$
-to $44.37\%$ without any visual token in the backbone, while tower-free
-\modelname-Free{}+VL-OPD reaches $42.46\%$ MC2 and $34.91\%$ Core3 ($97.3\%$ of
-the $21$k concatenation baseline's $35.87\%$). On the $28$k +open mixture,
-\modelname-Tower{} (\texttt{mf}+VL-OPD) reaches $35.90\%$ Core3 against $36.14\%$
-($99.3\%$) for the $28$k concatenation baseline, while tower-free
-\modelname-Free{} uses $74.2\%$ fewer FLOPs and runs $19.5\%$ faster at
-$4096$ patches.
-
-Finally, we characterise the limits of the paradigm through both a format
-boundary study and an image-perturbation diagnostic (real vs.\ cross-image
-derangement and blank controls). Retraining the concatenation baseline on open
-chart and document questions leaves its character-level chart reading and OCR
-accuracy flat ($10.32\%$ and $1.10\%$), while our model stays in the low single
-digits; adding the same data doubles our geometry accuracy ($1.83\%\to3.83\%$).
-On our $44$k deduplicated and class-balanced mixture under unified greedy
-decoding and a $100\%$ frozen backbone, tangent-bounded multi-frequency
-rotation lifts \modelname-Tower{} to $41.71\%$ MC2, $35.44\%$ Core3, and
-$20.18\%$ Avg6 (vs.\ $37.11\%/30.88\%/15.70\%$ for ROSE and
-$40.21\%/34.77\%/19.59\%$ for cross-attention alone), while combining our
-\texttt{rots} ($K{=}4$) frontend with bounded multi-frequency rotation and
-Step~2 distillation lifts encoder-free validation exact match from $26.4\%$ to
-$41.2\%$, reaches $20.08\%$ Avg6 and $35.32\%$ Core3 ($99.6\%$ of $44$k
-full-token LLaVA's $35.45\%$), and boosts MathVista to $24.90\%$ under
-forward-KL VL-OPD.
-
-Our contributions are:
+Our contributions are as follows:
 \begin{itemize}
-\item A dual-tier orthogonal rotation architecture that keeps zero visual
-tokens in the backbone and needs no external vision tower, using $2.4$M
-static parameters to turn the student's first layers into a vision encoder and
-discarding all image tokens thereafter.
-\item Multi-frequency and spatial-anchor rotation generators for the deep
-tier, together with a modality-decoupled wrapper that makes pure-text
-behaviour bit-exact.
-\item An online policy distillation stage that repairs autoregressive drift of
-rotation-injected models with $500$ steps of on-policy token-level KL.
-\item A controlled study against token concatenation, single-frequency
-rotation and LoRA-based built-in encoders, covering $0.6$B--$8$B students,
-three seeds, compute, latency, text retention, and an explicit statement of
-the paradigm's operating envelope.
+    \item We propose \modelname, a dual-tier visual adaptation framework
+    whose RVE and SAVM modules remove the need for an external vision
+    tower at inference and keep visual tokens out of deeper
+    self-attention while preserving the original text-only computation.
+
+    \item We develop VL-OPD for the rotational visual interface, using
+    teacher supervision on student-generated trajectories to mitigate
+    the mismatch between teacher-forced training and autoregressive
+    generation.
+
+    \item We provide a controlled evaluation of visual understanding,
+    free-form generation, inference efficiency, and text retention,
+    demonstrating competitive visual adaptation with substantially
+    reduced computation at high resolution.
 \end{itemize}

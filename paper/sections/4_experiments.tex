@@ -4,86 +4,61 @@
 \subsection{Setup}
 \label{sec:setup}
 
-\paragraph{Students and teacher.}
-Students are frozen \texttt{Qwen3}-family text LLMs~\citep{yang2025qwen3} of
-$0.6$B, $1.7$B and $8$B parameters; $1.7$B is our main configuration. The
-teacher for feature and logit supervision is \texttt{Qwen3-VL-8B-Instruct}~\citep{yang2025qwen3}
-(whose vision encoder is a $27$-layer, $0.41$B-parameter ViT), used only during
-training and---in the \modelname-Tower variant---as the frozen image encoder at
-inference.
-
-\paragraph{Training data.}
-Our base mixture (\emph{base}, $21$k) contains $24{,}082$ short-answer visual
-questions collected from an open visual-reasoning corpus, of which $21{,}000$
-are used for training and $2{,}408$ for validation. Inspecting the mixture
-revealed a skew that matters later: about $70\%$ of the items are multiple
-choice and the remainder are numeric or short-text answers, while open-ended
-chart reading and scene text are absent. We therefore build a second mixture
-(\emph{+open}, $28$k) that adds $8{,}334$ open-ended items ($6{,}500$
-document/chart questions~\citep{mathew2021docvqa} and $1{,}834$ general visual
-questions~\citep{hudson2019gqa}) plus $2{,}101$ plane-geometry problems,
-giving $28{,}000$ training and $3{,}388$ validation items. Finally, to test
-whether dataset biases (Yes/No imbalance or option-letter skew) explain public
-benchmark behaviour, we construct a third, strictly audited mixture
-(\emph{debiased}, $44$k; Sec.~\ref{sec:boundary}) that removes all images with
-exact SHA1 or perceptual $64$-bit dHash (Hamming distance ${\le}2$) matches
-against all $7{,}552$ test images across the six public benchmarks, enforces an
-image-grouped train/validation split ($39{,}949$ train / $4{,}441$ val rows,
-zero shared images), balances A/B/C/D options to $1{:}1{:}1{:}1$, and balances
-Yes/No items to $1{:}1$.
+\paragraph{Students, teacher, and data mixtures.}
+Students are frozen \texttt{Qwen3} text LLMs~\citep{yang2025qwen3} of $0.6$B,
+$1.7$B (default), and $8$B parameters, supervised by
+\texttt{Qwen3-VL-8B-Instruct}~\citep{bai2025qwen3vl} ($27$-layer, $0.41$B ViT,
+used at inference only in \modelname-Tower). To balance controlled comparison
+with strict bias auditing, we use three training mixtures (full breakdowns in
+Sec.~\ref{sec:supp_data}):
+(1) \emph{base} ($21$k train / $2{,}408$ val): short-answer visual reasoning
+questions (${\sim}70\%$ multiple choice, $30\%$ numeric/short text, no
+open-ended chart or scene-text items);
+(2) \emph{+open} ($28$k train / $3{,}388$ val): adds $8{,}334$ open-ended
+items ($6{,}500$ document/chart~\citep{mathew2021docvqa}, $1{,}834$ general
+VQA~\citep{hudson2019gqa}) and $2{,}101$ plane-geometry items; and
+(3) \emph{debiased} ($44$k: $39{,}949$ train / $4{,}441$ val): removes all
+images matching any of the $7{,}552$ benchmark test images by SHA1 or $64$-bit
+dHash (Hamming ${\le}2$), enforces image-disjoint splits, and balances A/B/C/D
+($1{:}1{:}1{:}1$) and Yes/No ($1{:}1$) labels.
 
 \paragraph{Benchmarks and protocols.}
-We report zero-shot accuracy on MMStar~\citep{chen2024mmstar} ($1{,}500$),
-HallusionBench~\citep{guan2024hallusionbench} ($951$),
-MathVista testmini~\citep{lu2024mathvista} ($1{,}000$),
-ChartQA~\citep{masry2022chartqa} ($2{,}500$),
-OCRBench~\citep{liu2023ocrbench} ($1{,}000$) and Geometry3K
-test~\citep{lu2021geometry3k} ($601$). Multiple-choice and yes/no items are
-scored by comparing the likelihood of the candidate strings, which avoids
-sensitivity to prompt formatting; open-ended items are decoded greedily and
-scored with the official relaxed metrics. We summarise results with three
-aggregates: \emph{MC2}, the mean of MMStar and HallusionBench; \emph{Core3},
-the mean of MMStar, HallusionBench and MathVista; and \emph{Avg6}, the mean of
-all six benchmarks. Because our training mixture is dominated by short-answer
-questions, Core3 is the most informative aggregate and Avg6 the least, since
-half of its terms probe abilities that either no model in the comparison has
-seen in training or that lie outside the operating envelope of the method
-(Sec.~\ref{sec:boundary}).
+We evaluate zero-shot accuracy on MMStar~\citep{chen2024mmstar} ($1{,}500$),
+HallusionBench~\citep{guan2024hallusionbench} ($951$), MathVista
+testmini~\citep{lu2024mathvista} ($1{,}000$), ChartQA~\citep{masry2022chartqa}
+($2{,}500$), OCRBench~\citep{liu2023ocrbench} ($1{,}000$), and Geometry3K
+test~\citep{lu2021geometry3k} ($601$), plus pure-text retention on
+GSM8K~\citep{cobbe2021gsm8k} and ARC-Challenge~\citep{clark2018arc}. Across
+all main tables (including Tab.~\ref{tab:grounding}), multiple-choice and
+yes/no items are scored via candidate-string likelihood to eliminate prompt
+format variance, while open-ended items use unified deterministic greedy
+decoding (no per-benchmark token bans) with official relaxed metrics; we also
+audit full free-form generation on all $44$k models via \texttt{--force-gen}
+(Tab.~\ref{tab:supp_fgen}). We report \emph{MC2} (MMStar, HallusionBench),
+\emph{Core3} (MMStar, HallusionBench, MathVista), and \emph{Avg6} (all six
+benchmarks).
 
-\paragraph{Baselines.}
-Because published VLM checkpoints differ by two to three orders of magnitude in
-pretraining scale ($1.2$M--$30$M image-text pairs on $7$B backbones), all
-baselines in our comparison are trained and evaluated under the exact same
-frozen $1.7$B student, data mixture, resolution ($392{\times}392$), and step
-budget, alongside the $8$B teacher and blind student as upper and lower
-reference bounds:
-(1) \emph{With external vision tower}: \emph{LLaVA-Proj}~\citep{liu2024improved}
-prepends all projected visual tokens to all $28$ layers ($21$k and $28$k);
-\emph{FastV}~\citep{chen2024fastv} and \emph{Token-Pool}~\citep{cha2024honeybee}
-compress the visual sequence to $32$ tokens via norm-based pruning or spatial
-average pooling; \emph{ROSE}~\citep{rose2025} injects single-frequency
-rotations with zero visual tokens; and \emph{Hinton-KD}~\citep{hinton2015distilling}
-and \emph{RKD}~\citep{park2019rkd} supervise the rotation generator with
-off-policy logit KL or relational feature similarity.
-(2) \emph{Encoder-free architectures}: \emph{Patch-Merger Only} ($K{=}0$) maps
-patches directly without early LLM layers; \emph{VoRA}~\citep{vora2025}
-inserts rank-$16$ LoRA adapters into the first $K{=}4$ layers; and
-\emph{EVE-style Copy}~\citep{diao2024eve} duplicates and unfreezes the first
-$K{=}4$ layers ($201$M parameters) as a decoupled vision branch.
-(3) \emph{Encoder-free on-policy distillation}: starting from the same
-\modelname-Free checkpoint, we compare our forward-KL \texttt{VL-OPD} against
-\emph{GKD}~\citep{agarwal2024gkd} (generalized JSD),
-\emph{MiniLLM}~\citep{gu2024minillm} (mode-seeking reverse KL), and
-\emph{SeqKD}~\citep{kim2016sequence} (hard top-$1$ sequence distillation).
-
-\paragraph{Implementation.}
-Rotations use block size $b{=}64$, query width $d_q{=}256$, and layers
-$\{0,4,8,12,16,20,24\}$ for $0.6$B/$1.7$B and $\{0,5,10,15,20,25,30\}$ for
-$8$B. Stage~1 trains for $6{,}000$ steps, the frontend warm-up for $2{,}500$,
-joint training for $3{,}000$, and on-policy distillation for $500$. A single
-model trains in one to two hours on one $46$GB GPU; all experiments fit in a
-three-GPU budget, and every reported number is reproduced from stored
-prediction files.
+\paragraph{Baselines and implementation.}
+All baselines share the identical frozen $1.7$B backbone, data mixture,
+$392{\times}392$ resolution, and step budget:
+(1) \emph{With external tower}: \emph{LLaVA-Proj}~\citep{liu2024improved}
+(full visual tokens), \emph{FastV}~\citep{chen2024fastv} (top-$32$ norm-pruned
+tokens), \emph{Spatial-Pool} (adaptive $32$-token spatial average pooling,
+following the token-pooling setup in~\citep{cha2024honeybee}),
+\emph{ROSE}~\citep{rose2025} (single-frequency rotation), and
+\emph{Hinton-KD}~\citep{hinton2015distilling} / \emph{RKD}~\citep{park2019rkd};
+(2) \emph{Encoder-free}: \emph{Patch-Merger Only} ($K{=}0$),
+\emph{VoRA}~\citep{vora2025} (rank-$16$ LoRA in $K{=}4$ layers), and
+\emph{EVE-style Copy}~\citep{diao2024eve} ($K{=}4$ unfrozen copy, $201$M
+params);
+(3) \emph{On-policy distillation}: \emph{GKD}~\citep{agarwal2024gkd},
+\emph{MiniLLM}~\citep{gu2024minillm}, and \emph{SeqKD}~\citep{kim2016sequence}.
+Rotations use $b{=}64$, $d_q{=}256$, and layers $\{0,4,8,12,16,20,24\}$
+($0.6$B/$1.7$B) or $\{0,5,10,15,20,25,30\}$ ($8$B). Reference $21$k/$28$k runs
+train Stage~1 for $6{,}000$ steps, frontend warm-up for $2{,}500$, joint
+training for $3{,}000$, and VL-OPD for $500$; the $44$k audit uses $2{,}400$
+Stage~1 steps ($+800$ for $R_1$--$R_3$), $2{,}200$ frontend, $1{,}200$ joint,
+and $600$ Step~2 steps (full hyperparameters in Tab.~\ref{tab:supp_hparams}).
 
 \subsection{Main Results}
 \label{sec:main}
@@ -91,15 +66,12 @@ prediction files.
 \begin{table*}[t]
 \centering
 \caption{\textbf{Main comparison across external baselines and \modelname{} variants}
-($1.7$B frozen student, plus $0.6$B tower-free; all single-run entries use seed
-$s{=}0$, with $3$-seed means reported in Tab.~\ref{tab:scale}). Models are
-grouped by architecture and annotated with their exact training mixture ($21$k
-\emph{base} vs.\ $28$k \emph{+open}) so comparisons are strictly within-mixture.
-``Tower'' indicates an external frozen $0.41$B ViT, ``Tok.'' the number of
-visual tokens inside the deeper backbone layers, and ``FLOPs'' the relative
-forward compute at $4096$ patches ($1.00{\times}{=}9.85$ TFLOPs). MC2, Core3 and
-Avg6 are defined in Sec.~\ref{sec:setup}; best result per block is in
-\textbf{bold}, second-best \underline{underlined}.}
+($1.7$B frozen student, plus $0.6$B tower-free; single runs use $s{=}0$, with
+$3$-seed means in Tab.~\ref{tab:supp_scale}). Comparisons are strictly
+within-mixture ($21$k \emph{base} vs.\ $28$k \emph{+open}). ``Tok.'' is deep
+visual token count; ``FLOPs'' is relative prefill compute at $4{,}096$ patches
+($1.00{\times}{=}9.85$ TFLOPs). Best per block in \textbf{bold}, second
+\underline{underlined}.}
 \label{tab:main}
 \small
 \setlength{\tabcolsep}{3.8pt}
@@ -123,7 +95,7 @@ RKD~\citep{park2019rkd} (Relational Feature KD)         & $21$k & 0.4B ViT & \te
 \multicolumn{11}{@{}l}{\textit{With External Vision Tower (0.41B ViT, $28$k +Open Mixture, $s{=}0$)}} \\
 LLaVA-Proj~\citep{liu2024improved} (Full Tokens)        & $28$k & 0.4B ViT & all & $1.00\times$ & \textbf{29.27} & 54.15 & \underline{25.00} & 41.71 & \textbf{36.14} & \underline{20.89} \\
 FastV~\citep{chen2024fastv} (Top-$32$ Visual Tokens)    & $28$k & 0.4B ViT & 32  & $0.72\times$ & 28.53 & 49.74 & 24.90 & 39.14 & 34.39 & 19.43 \\
-Token-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & $28$k & 0.4B ViT & 32  & $0.72\times$ & \underline{29.13} & 53.10 & \textbf{25.80} & 41.12 & \underline{36.01} & \textbf{21.06} \\
+Spatial-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & $28$k & 0.4B ViT & 32  & $0.72\times$ & \underline{29.13} & 53.10 & \textbf{25.80} & 41.12 & \underline{36.01} & \textbf{21.06} \\
 \textbf{\modelname-Tower (\texttt{hyb}, CE, Ours)}      & $28$k & 0.4B ViT & \textbf{0} & \textbf{0.69$\times$} & 28.27 & \underline{56.05} & 19.60 & \textbf{42.16} & 34.64 & 18.16 \\
 \textbf{\modelname-Tower (\texttt{mf}+VL-OPD, Ours)}    & $28$k & 0.4B ViT & \textbf{0} & \textbf{0.69$\times$} & 26.80 & \textbf{57.41} & 23.50 & \underline{42.11} & 35.90 & 18.50 \\
 \midrule
@@ -147,131 +119,49 @@ VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$ + \texttt{mf}, \texttt{ce} init) & 
 \end{tabular}}
 \end{table*}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.96\textwidth]{fig_main_results.png}
-\caption{\textbf{(a) Main public benchmark comparison} ($1.7$B student,
-within-mixture comparisons at $s{=}0$, plus $0.6$B tower-free). \modelname{}
-leads on perception (MMStar) and anti-hallucination (HallusionBench) while
-keeping the backbone free of visual tokens; the tower-free variant matches or
-exceeds full-token LLaVA on MC2 at a quarter of its compute. \textbf{(b)
-Pure-text retention.} Only the decoupled pathway preserves GSM8K ($70.4\%$) and
-ARC-C ($71.4\%$); permanently merging vision adapters---LoRA, rotation, or
-rotation with scaling---collapses mathematical reasoning.}
-\label{fig:mainres}
-\end{figure*}
-
-Tab.~\ref{tab:main} and Fig.~\ref{fig:mainres} summarise the comparison.
-Four observations follow.
-
-\emph{(i) Within the same mixture, perception and anti-hallucination scores
-exceed token concatenation without any visual token.} On the $21$k base mixture
-($s{=}0$), \modelname-Tower with the hybrid generator reaches $30.60\%$ on
-MMStar and $58.15\%$ on HallusionBench, against $29.60\%$ and $53.10\%$ for the
-retrained token-concatenation baseline. The MC2 aggregate rises from $41.35\%$
-to $44.37\%$ ($+3.02$ points) and Core3 reaches $35.75\%$ against $35.87\%$
-($99.7\%$), while the backbone processes text of length $T$ rather than $T+N$
-in every one of its $28$ layers.
-
-\emph{(ii) Diagram reasoning catches up on the $+open$ mixture with genuine
-visual grounding.} On the $28$k +open mixture ($s{=}0$), the multi-frequency
-generator with on-policy distillation reaches $23.50\%$ on MathVista ($+4.10$
-points above its shuffled-image control at $19.40\%$ and $+4.90$ above blank at
-$18.60\%$), bringing Core3 to $35.90\%$ against $36.14\%$ ($99.3\%$) for the
-$28$k token-concatenation baseline and $36.01\%$ for $32$-token spatial pooling.
-
-\emph{(iii) Removing the encoder costs little compute and preserves parity on
-MC2.} With no external vision tower at all, \modelname-Free{} (\texttt{rots}
-$K{=}4$ + \texttt{mf}) reaches $41.32\%$ MC2 on the $21$k base mixture (vs.\
-$36.84\%$ for VoRA~\citep{vora2025} under the identical \texttt{mf} deep tier
-and \texttt{ce} arm), and adding VL-OPD on the base mixture lifts
-\modelname-Free{} (\texttt{hyb}) from $40.21\%$ to $42.46\%$ MC2 and from
-$33.57\%$ to $34.91\%$ Core3 ($97.3\%$ of the $21$k LLaVA baseline's Core3)
-while using $74.2\%$ fewer FLOPs.
-
-\emph{(iv) Both tiers contribute when held under strict single-factor controls.}
-Holding the deep tier fixed at \texttt{mf} and comparing frontends in the same
-\texttt{ce} arm ($21$k base, $s{=}0$), rotation with scaling (\texttt{rots})
-beats rank-$16$ LoRA by $+4.48$ points of MC2 ($41.32\%$ vs.\ $36.84\%$) and
-$+2.82$ points of Core3 ($33.55\%$ vs.\ $30.73\%$) with $36\%$ fewer frontend
-parameters ($2.40$M vs.\ $3.74$M); under a single-frequency deep tier,
-\texttt{rots} still leads LoRA ($38.14\%$ vs.\ $36.84\%$ MC2). Holding the
-frontend fixed (external encoder, $21$k base, $s{=}0$) and comparing deep
-generators, multi-frequency and hybrid rotation beat single-frequency ROSE by
-$+0.75$ and $+4.39$ points of MC2 ($40.73\%$ and $44.37\%$ vs.\ $39.98\%$).
+Tab.~\ref{tab:main} (visualized in Fig.~\ref{fig:supp_mainres}) establishes four
+conclusions under matched-data comparisons:
+\emph{(i) Perception and hallucination gains without visual tokens:} on $21$k
+\emph{base} ($s{=}0$), \modelname-Tower (\texttt{hyb}) reaches $30.60\%$
+MMStar and $58.15\%$ HallusionBench ($44.37\%$ MC2, $+3.02$ over LLaVA-Proj's
+$41.35\%$), while matching $99.7\%$ of its Core3 ($35.75\%$ vs.\ $35.87\%$)
+with text-only sequence length $T$ in every layer.
+\emph{(ii) Diagram reasoning with genuine grounding:} on $28$k \emph{+open}
+($s{=}0$), \modelname-Tower (\texttt{mf}+VL-OPD) attains $23.50\%$ MathVista
+($+4.10$ above shuffled-image $19.40\%$ and $+4.90$ above blank $18.60\%$) and
+$35.90\%$ Core3 ($99.3\%$ of LLaVA-Proj's $36.14\%$).
+\emph{(iii) Tower-free parity at a quarter of the compute:} \modelname-Free{}
+(\texttt{rots} $K{=}4$+\texttt{mf}) scores $41.32\%$ MC2 on $21$k \emph{base}
+(vs.\ $36.84\%$ for VoRA), and VL-OPD lifts \modelname-Free{} (\texttt{hyb})
+from $40.20\%$ to $42.46\%$ MC2 and $33.57\%$ to $34.91\%$ Core3 ($97.3\%$ of
+LLaVA-Proj) with $74.2\%$ fewer FLOPs.
+\emph{(iv) Single-factor contributions of both tiers:} holding the deep tier at
+\texttt{mf}, \texttt{rots} beats rank-$16$ LoRA by $+4.48$ MC2 ($41.32\%$ vs.\
+$36.84\%$) with $36\%$ fewer parameters ($2.40$M vs.\ $3.74$M); holding the
+external encoder fixed, \texttt{mf} and \texttt{hyb} surpass single-frequency
+ROSE by $+0.75$ and $+4.39$ MC2 ($40.73\%$ and $44.37\%$ vs.\ $39.98\%$).
 
 \subsection{Scaling Across Student Sizes and Seeds}
 \label{sec:scaling}
 
-\begin{table}[t]
-\centering
-\caption{\textbf{Cross-size behaviour and seed variance} (public benchmarks).
-$0.6$B models are competitive with $1.7$B baselines on perception; $8$B
-students do not benefit, since the frozen backbone is not the bottleneck.
-All single-run rows use $s{=}0$, and $3$-seed rows average $s\in\{0,1,2\}$. Error bars are sample standard deviations ($\mathrm{ddof}{=}1$).}
-\label{tab:scale}
-\footnotesize
-\setlength{\tabcolsep}{2.4pt}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}llcccccc@{}}
-\toprule
-Scale & Model (Mix, Seed) & MMStar & Hallu. & MathV. & MC2 & Core3 & Avg6 \\
-\midrule
-$0.6$B & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 26.40 & 57.73 & 20.20 & 42.06 & 34.78 & 17.97 \\
-$0.6$B & Free (CE, $21$k, $s{=}0$)               & 28.07 & 54.68 & 20.40 & 41.37 & 34.38 & 18.03 \\
-$0.6$B & Free+OPD ($21$k, $s{=}0$)               & 28.87 & 54.47 & 19.00 & 41.67 & 34.11 & 17.69 \\
-$0.6$B & Free+OPD ($28$k, $s{=}0$)               & 27.53 & 57.83 & 18.60 & \textbf{42.68} & \textbf{34.66} & \textbf{18.05} \\
-$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36$_{\pm2.70}$ & \textbf{57.69}$_{\pm0.12}$ & 18.73$_{\pm0.12}$ & 41.52$_{\pm1.39}$ & 33.93$_{\pm0.90}$ & 17.62$_{\pm0.51}$ \\
-\midrule
-$1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56$_{\pm1.49}$ & 56.36$_{\pm1.04}$ & 18.97$_{\pm1.18}$ & \textbf{41.46}$_{\pm0.75}$ & \textbf{33.96}$_{\pm0.59}$ & \textbf{17.68}$_{\pm0.43}$ \\
-$1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89}$_{\pm2.28}$ & 53.84$_{\pm1.27}$ & 19.00$_{\pm2.05}$ & 40.36$_{\pm0.83}$ & 33.24$_{\pm1.14}$ & 17.27$_{\pm0.44}$ \\
-$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm3.21}$ & 56.12$_{\pm1.74}$ & \textbf{19.13}$_{\pm1.00}$ & 41.11$_{\pm1.35}$ & 33.79$_{\pm1.05}$ & 17.49$_{\pm0.30}$ \\
-\midrule
-$8$B   & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 25.67 & 54.15 & 19.90 & 39.91 & 33.24 & 17.30 \\
-$8$B   & Free (\texttt{hyb}, $28$k, $s{=}0$)     & 24.80 & \textbf{56.99} & 19.20 & \textbf{40.90} & \textbf{33.66} & \textbf{17.50} \\
-$8$B   & Free+OPD ($28$k, $s{=}0$)               & \textbf{27.40} & 53.31 & 18.10 & 40.36 & 32.94 & 16.91 \\
-\bottomrule
-\end{tabular}}
-\end{table}
-
-Tab.~\ref{tab:scale} reports the same pipelines with $0.6$B and $8$B students,
-as well as three-seed averages ($s\in\{0,1,2\}$) on the $28$k +open mixture.
-A $0.6$B tower-free model reaches $42.68\%$ MC2 at $s{=}0$ ($41.52\%{\pm}1.39\%$
-across three seeds), matching the $1.7$B models on perception and
-hallucination; the smallest student is therefore already sufficient for the
-abilities this paradigm provides. On $1.7$B (+open, $3$ seeds), online
-distillation improves the tower-free model's three-seed mean from $40.36\%$ to
-$41.11\%$ MC2 ($+0.75$ points) and from $33.24\%$ to $33.79\%$ Core3. Scaling
-to $8$B does not help, and in our measurements slightly hurts: because the
-backbone is frozen and only the rotation generators are trained, additional
-capacity in the LLM does not translate into better visual steering, while a
-larger model makes optimisation of the small adapter set harder at a fixed step
-budget. We see this as evidence that the bottleneck is the interface, not the
-language model.
+Across $0.6$B, $1.7$B, and $8$B students and three-seed runs ($s\in\{0,1,2\}$
+on $28$k \emph{+open}; full numbers in Tab.~\ref{tab:supp_scale}), a $0.6$B
+tower-free model already reaches $42.68\%$ MC2 at $s{=}0$
+($41.52\%{\pm}1.39\%$ over three seeds), matching $1.7$B perception. Across
+three $1.7$B seeds, VL-OPD lifts \modelname-Free{} from $40.36\%$ to $41.11\%$
+MC2 and $33.24\%$ to $33.79\%$ Core3. Scaling to $8$B yields no further gain
+($39.91\%$--$40.90\%$ MC2), confirming that the frozen-backbone interface, not
+language capacity, is the accuracy bottleneck.
 
 \subsection{Ablations}
 \label{sec:abl}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.98\textwidth]{fig_ablations.png}
-\caption{\textbf{Ablation studies.} \textbf{(a)} Built-in frontend
-parameterisation grouped by initialisation arm (\texttt{rel} vs.\ \texttt{ce}).
-\textbf{(b)} Built-in encoder depth $K\in\{0,2,4,6\}$, showing validation
-first-token accuracy and visual grounding gap (shuffled minus paired CE).
-\textbf{(c)} Step~2 online policy distillation (\texttt{VL-OPD}) gains under
-forced free-form greedy generation.}
-\label{fig:abl}
-\end{figure*}
-
 \begin{table}[t]
 \centering
 \caption{\textbf{Frontend parameterisation on the $21$k base mixture ($s{=}0$).}
-Every row is reported from a single joint checkpoint and its exact public
-benchmark evaluation. Rows are grouped by initialisation arm (\texttt{rel} vs.\
-\texttt{ce}) and deep rotation tier (\texttt{single}, \texttt{mf}, \texttt{hyb}).
-``Val CE'', ``Gap'' (shuffled minus paired CE), and ``1st/Full'' are measured on
-the held-out validation split.}
+All validation and public scores come from the same joint checkpoint, grouped
+by initialisation arm (\texttt{rel} vs.\ \texttt{ce}) and deep tier
+(\texttt{single}, \texttt{mf}, \texttt{hyb}).}
 \label{tab:front}
 \footnotesize
 \setlength{\tabcolsep}{2.2pt}
@@ -293,64 +183,12 @@ LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 
 \end{tabular}}
 \end{table}
 
-\paragraph{Frontend parameterisation (Sec.~\ref{sec:abl}).}
-Tab.~\ref{tab:front} and Fig.~\ref{fig:abl}(a) isolate the ways of turning the
-first $K{=}4$ layers into a vision encoder on the $21$k base mixture ($s{=}0$),
-with every row's validation and public metrics taken from the exact same
-checkpoint. Within the \texttt{rel}-initialised single-frequency group, pure
-rotation (\texttt{rot}) reaches $40.73\%$ MC2 and $17.55\%$ Avg6 with $2.32$M
-in-layer parameters, ahead of copying the layers ($38.82\%$, $201$M) and of dropping the
-layers entirely ($35.92\%$, $K{=}0$). Within the \texttt{ce}-initialised group,
-holding the deep tier fixed at \texttt{mf}, rotation with channel scaling
-(\texttt{rots}) beats rank-$16$ LoRA by $+4.48$ points of MC2 ($41.32\%$ vs.\
-$36.84\%$), $+2.82$ points of Core3 ($33.55\%$ vs.\ $30.73\%$), and a larger
-validation grounding gap ($1.783$ vs.\ $1.667$). Even with a single-frequency deep
-tier, \texttt{rots} ($38.14\%$ MC2) exceeds LoRA+\texttt{mf} ($36.84\%$).
-(Note: in this $21$k sweep the LoRA baseline used transposed output-projection
-ranks totaling $3.74$M static parameters; in our $44$k debiased implementation
-of Tab.~\ref{tab:grounding}, rank-$16$ LoRA uses $2.49$M static parameters
-against $2.40$M for \texttt{rots}, plus the shared $54.03$M patch-embedding and
-merger module.)
-
-\paragraph{Depth of the built-in encoder.}
 \begin{table}[t]
 \centering
-\caption{\textbf{Frontend depth} on the $28$k \emph{+open} mixture (\texttt{hyb}
-deep tier). Every row comes from a single joint checkpoint ($s{=}0$, plus the
-$3$-seed mean at $K{=}4$). Grounding gap is the cross-entropy difference
-between shuffled and correctly paired validation images.}
-\label{tab:depth}
-\footnotesize
-\setlength{\tabcolsep}{3.0pt}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lccccccc@{}}
-\toprule
-$K$ & Params & CE$\downarrow$ & Gap$\uparrow$ & 1st$\uparrow$ & MC2 & Core3 & Avg6 \\
-\midrule
-$0$ ($s{=}0$)         & 0      & 2.382 & 0.387 & 30.7 & 42.31 & 34.61 & 17.94 \\
-$2$ ($s{=}0$)         & 1.20M  & \textbf{2.267} & 0.815 & 36.7 & 41.30 & 33.93 & 17.68 \\
-\textbf{$4$ ($s{=}0$)} & \textbf{2.40M} & 2.294 & \underline{0.896} & 36.0 & 41.09 & 33.76 & 17.58 \\
-\textbf{$4$ ($3$ seeds)} & \textbf{2.40M} & 2.329 & \textbf{1.150} & 35.8 & 40.36 & 33.24 & 17.27 \\
-$6$ ($s{=}0$)         & 3.59M  & 2.272 & 0.978 & \textbf{38.0} & 41.94 & 33.90 & 17.66 \\
-\bottomrule
-\end{tabular}}
-\end{table}
-Tab.~\ref{tab:depth} varies $K$ on the $28$k +open mixture. On the validation
-split, the visual grounding gap rises sharply from $0.387$ at $K{=}0$ to $0.896$
-at $K{=}4$ ($s{=}0$; $1.150$ across three seeds) and $0.978$ at $K{=}6$, while
-first-token accuracy rises from $30.7\%$ to $36.0\%$--$38.0\%$. Thus four early
-LLM layers more than double the model's sensitivity to the paired image on the
-training distribution, whereas zero-shot public MC2 stays in a narrow band
-($41.09\%$--$42.31\%$ at $s{=}0$). We therefore fix $K{=}4$ as the default
-trade-off between visual conditioning and compute.
-
-\paragraph{On-policy distillation and feature supervision.}
-\begin{table}[t]
-\centering
-\caption{\textbf{Step~2 online distillation comparison and free-generation gains.}
-Top: comparison of external sequence/on-policy distillation objectives from the
-same \modelname-Free ($1.7$B) checkpoint ($500$ steps). Bottom: free-form
-greedy generation accuracy with candidate scoring disabled.}
+\caption{\textbf{Step~2 distillation objectives and free-generation gains}
+($28$k \emph{+open}, $s{=}0$). Top: sequence/on-policy objectives from the same
+$1.7$B \modelname-Free{} checkpoint ($500$ steps). Bottom: forced free-form
+greedy generation without candidate scoring.}
 \label{tab:opd}
 \footnotesize
 \setlength{\tabcolsep}{2.8pt}
@@ -366,49 +204,50 @@ Offline CE (Start)            & teacher-forced & 2.294 & 100.0\% & 41.09 & 33.76
 + VL-OPD (Ours)               & Forward KL      & 2.475 & 95.0\% & \underline{40.35} & \underline{32.90} \\
 \midrule
 \multicolumn{2}{@{}l}{\textit{Free-form greedy generation}} & MMStar & Hallu. & MathV. & MC2 \\
-$0.6$B Free ($28$k) & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
+$0.6$B Free & before VL-OPD & 14.53 & 23.55 & 9.70 & 19.04 \\
             & after VL-OPD  & \textbf{22.20} & \textbf{33.44} & \textbf{14.40} & \textbf{27.82} \\
-$1.7$B Free ($21$k) & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
+$1.7$B Free & before VL-OPD & 14.07 & 24.40 & 8.30 & 19.23 \\
             & after VL-OPD  & \textbf{18.13} & 22.92 & \textbf{9.30} & \textbf{20.53} \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-Tab.~\ref{tab:opd} compares our forward-KL \texttt{VL-OPD} against three
-established sequence and on-policy distillation objectives, all starting from
-the \emph{same} \modelname-Free ($1.7$B, \emph{+open}, seed $0$) checkpoint and
-trained for $500$ steps. We report this comparison in full, including where our
-objective loses. On candidate-scoring aggregates \texttt{VL-OPD} does
-\emph{not} beat the alternatives: it reaches $40.35\%$ MC2 and $32.90\%$ Core3,
-below SeqKD ($41.11/33.50$) and below the offline starting checkpoint itself
-($41.09/33.76$). End-of-sequence termination likewise \emph{degrades} from
-$100\%$ at the start to $95\%$ under forward KL, although it degrades far less
-than under mode-seeking reverse KL (MiniLLM~\citep{gu2024minillm}, $59\%$),
-which locks onto a single mode and amplifies repetitive run-on tails. The
-grounding gap (shuffled minus paired validation CE) also shrinks under
-\texttt{VL-OPD}, from $0.896$ to $0.674$, i.e.\ distillation at this scale makes
-the model \emph{less} image-dependent on the training distribution, not more.
-The one place \texttt{VL-OPD} helps unambiguously is forced free-form decoding
-on the $0.6$B tower-free model, where it adds $+7.67$ points on MMStar, $+9.89$
-on HallusionBench and $+4.70$ on MathVista; on the $1.7$B model the HallusionBench
-free-form score instead \emph{falls} by $1.48$ points
-(Tab.~\ref{tab:opd}, bottom). We therefore claim only that forward KL is a
-stable terminator relative to reverse KL and that it improves small-model
-free-form generation, not that it dominates other distillation objectives.
-Finally, switching off the feature term of Eq.~\eqref{eq:feat} during joint
-training yields $42.63\%$ MC2 and $34.89\%$ Core3 against the supervised
-variant's $41.09\%$ and $33.76\%$ at the same starting point: removing feature
-alignment does not hurt, and slightly helps, the public aggregates.
+\paragraph{Frontend parameterisation and depth.}
+Tab.~\ref{tab:front} (see also Fig.~\ref{fig:supp_abl}(a)) isolates how to turn
+the first $K{=}4$ frozen layers into a built-in encoder on $21$k \emph{base}
+($s{=}0$). In the \texttt{rel} group, static rotation (\texttt{rot}) outperforms
+both $201$M layer copying ($40.73\%$ vs.\ $38.82\%$ MC2) and $K{=}0$
+($35.92\%$). In the \texttt{ce} group with \texttt{mf} fixed, \texttt{rots}
+beats rank-$16$ LoRA by $+4.48$ MC2 ($41.32\%$ vs.\ $36.84\%$) and larger
+grounding gap ($1.783$ vs.\ $1.667$) with $36\%$ fewer parameters ($2.40$M vs.\
+$3.74$M); even with single-frequency deep rotation, \texttt{rots} leads LoRA
+($38.14\%$). Varying encoder depth $K\in\{0,2,4,6\}$ on $28$k \emph{+open}
+(Tab.~\ref{tab:supp_depth}, Fig.~\ref{fig:supp_abl}(b)) raises the validation
+grounding gap from $0.387$ ($K{=}0$) to $0.896$ ($K{=}4$, $s{=}0$; $1.150$
+three-seed mean) and $0.978$ ($K{=}6$), and first-token accuracy from $30.7\%$
+to $36.0\%$--$38.0\%$; we fix $K{=}4$ for compute efficiency.
+
+\paragraph{On-policy distillation and feature supervision.}
+Tab.~\ref{tab:opd} compares forward-KL \texttt{VL-OPD} against GKD, MiniLLM,
+and SeqKD from the exact same $1.7$B \emph{+open} checkpoint ($500$ steps). We
+report where \texttt{VL-OPD} does and does not help: on candidate scoring it
+trails SeqKD ($40.35/32.90$ vs.\ $41.11/33.50$), and its validation grounding
+gap narrows ($0.896{\to}0.674$), yet forward KL preserves $95\%$ EOS
+termination vs.\ $59\%$ for mode-seeking reverse KL (MiniLLM). Its clearest
+gain is under forced free-form decoding on $0.6$B ($+7.67$ MMStar, $+9.89$
+HallusionBench, $+4.70$ MathVista), whereas $1.7$B HallusionBench drops by
+$1.48$ points. Disabling Stage~2 feature supervision $\mathcal{L}_{\mathrm{feat}}$
+(Sec.~\ref{sec:opd}) during joint training reaches $42.63\%$ MC2 / $34.89\%$ Core3 (vs.\ $41.09\% / 33.76\%$),
+indicating that end-to-end alignment suffices once Stage~2 initializes RVE.
 
 \subsection{Efficiency and Text Retention}
 \label{sec:eff}
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Compute and latency} at increasing image resolution
-($1.7$B, text query length $64$). Latency is measured with the GPU
-exclusively occupied. At $4096$ patches \modelname{} needs $74.2\%$ fewer
-FLOPs and is $19.5\%$ faster than token concatenation.}
+\caption{\textbf{Compute and latency} versus visual patch count ($1.7$B, query
+length $64$, exclusive GPU). At $4{,}096$ patches \modelname-Free{} uses
+$74.2\%$ fewer FLOPs and runs $19.5\%$ faster than token concatenation.}
 \label{tab:eff}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -426,70 +265,29 @@ Patches & \modelname{} & ROSE & LLaVA & Saving \\
 \end{tabular}
 \end{table}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.98\textwidth]{fig_efficiency.png}
-\caption{\textbf{Efficiency and data scaling.} \textbf{(a, b)} Forward compute
-(TFLOPs) and exclusive-GPU latency versus visual patch count; discarding image
-tokens after layer $K{=}4$ saves $74.2\%$ FLOPs at $4096$ patches and crosses
-over in wall-clock latency beyond ${\sim}3$k patches. \textbf{(c)} Validation
-full-answer accuracy versus training sample size $N\in\{1\text{k}\dots21\text{k}\}$:
-distillation (\texttt{KD+Rel}) achieves $3.5\times$ sample efficiency at
-$N{=}6$k, while the \texttt{CE} arm scales best at full data.}
-\label{fig:eff}
-\end{figure*}
+Tab.~\ref{tab:eff} (and Fig.~\ref{fig:supp_eff}) quantifies the resolution
+scaling. While LLaVA-Proj pays $O((T{+}N)^2)$ across all $28$ layers,
+\modelname-Free{} confines $O(N^2)$ patch attention to $K{=}4$ layers; it
+crosses over in wall-clock time around ${\sim}3$k patches and achieves $99.4$
+vs.\ $123.4$\,ms ($19.5\%$ speedup) and $2.54$ vs.\ $9.85$ TFLOPs ($-74.2\%$) at
+$4{,}096$ patches. For text retention (Fig.~\ref{fig:supp_mainres}(b)),
+bypassing RVE and SAVM preserves exact unmodified backbone performance
+($70.4\%$ GSM8K, $71.4\%$ ARC-C). In a controlled ablation without pure-text
+replay, permanently merging visual-only frontend adapters into layers
+$0$--$3$---as LoRA, pure rotation, or $W\mathrm{diag}(s)R_{\mathrm{s}}^{\top}$---drops
+GSM8K to $0.0\%$, $0.0\%$, and $0.8\%$ (ARC-C to $27.4\%$, $24.2\%$, $23.4\%$),
+underscoring the advantage of modality-decoupled gating when freezing the LLM.
 
-Tab.~\ref{tab:eff} and Fig.~\ref{fig:eff} quantify the trade-off. The saving
-grows with resolution because the baseline pays $O((T+N)^2)$ in every layer
-while \modelname{} pays $O(N^2)$ once for $K$ layers. Up to $2{,}304$ patches
-the baseline is still faster in wall-clock terms on our hardware ($66.9$ vs.\
-$80.4$ ms), since the frontend's bidirectional pass over all patches is not
-free; between $2{,}304$ and $4{,}096$ patches (${\sim}3$k patches) the ordering
-reverses and at $4{,}096$ patches \modelname{} is $19.5\%$ faster ($99.4$ vs.\
-$123.4$ ms).
-
-Text retention is reported in Fig.~\ref{fig:mainres} (right). The decoupled
-pathway keeps GSM8K at $70.4\%$ and ARC-C at $71.4\%$, identical to the
-unmodified LLM. Merging the frontend into the text layers---whether as LoRA,
-pure rotation, or rotation with scaling (using the exact post-multiplied form
-$W\mathrm{diag}(d)R_{\mathrm{s}}^{\top}$)---drops GSM8K to $0.0\%$, $0.0\%$ and
-$0.8\%$ respectively. This is the clearest argument for keeping vision
-adapters context-gated instead of permanently fused.
-
-\subsection{Where the Paradigm Stops: Boundary and Grounding Diagnostics}
+\subsection{Boundary and Grounding Diagnostics}
 \label{sec:boundary}
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Format boundary study.} Adding $8{,}334$ open-ended
-document/chart questions and $2{,}101$ geometry problems to the training
-mixture ($21$k$\to$$28$k, $s{=}0$). Geometry doubles for \modelname{}, whereas
-character-level chart reading and scene text stay flat for both methods: the
-residual gap is architectural, not a data artefact.}
-\label{tab:boundary}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}llccc@{}}
-\toprule
-Mixture & Model & ChartQA & OCRBench & Geo3K \\
-\midrule
-base ($21$k)      & LLaVA-Proj & \textbf{10.40} & \textbf{1.60} & \textbf{6.49} \\
-base ($21$k)      & \modelname-Tower & 1.08 & 0.00 & 1.83 \\
-\midrule
-+open ($28$k)     & LLaVA-Proj & \textbf{10.32} & \textbf{1.10} & 5.49 \\
-+open ($28$k)     & \modelname-Tower & 1.24 & 0.00 & \textbf{3.83} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{table}[t]
-\centering
 \caption{\textbf{Debiased $44$k mixture under unified frozen-backbone auditing}
-($s{=}0$). All methods are trained on the identical $44$k deduplicated,
-label-balanced mixture ($1{:}1$ Yes/No, $1{:}1{:}1{:}1$ A/B/C/D, image-grouped
-split) with the LLM $100\%$ frozen, unified greedy decoding, and official
-relaxed ChartQA scoring. ``Val CE/EM'' and ``Gap'' (shuffled minus paired CE)
-are measured on the held-out validation split.}
+($s{=}0$). Trained on the deduplicated, label-balanced $44$k split ($1{:}1$
+Yes/No, $1{:}1{:}1{:}1$ A/B/C/D, zero shared test images) with unified greedy
+decoding and relaxed ChartQA scoring. Full $3$-seed means and
+\texttt{--force-gen} checks appear in Tab.~\ref{tab:supp_v6seeds}--Tab.~\ref{tab:supp_fgen}.}
 \label{tab:grounding}
 \footnotesize
 \setlength{\tabcolsep}{1.8pt}
@@ -518,55 +316,39 @@ VoRA (LoRA $K{=}4$, $S_1$)                       & 1.163/40.3\% & 0.149 & 27.93 
 \end{tabular}}
 \end{table}
 
-Our benchmarks mix two very different demands. Perception, hallucination and
-diagram reasoning ask \emph{what is in the image}; chart reading and OCR ask
-the model to \emph{copy a string exactly}. To separate the two we first audited
-the base mixture and found that it contains no open-ended chart item and no
-scene-text item at all: the chart-like portion is entirely multiple choice.
-We therefore rebuilt the mixture to include the missing formats and retrained
-both the token-concatenation baseline and \modelname{} on it
-(Tab.~\ref{tab:boundary}). Two results are decisive. First, the baseline's
-ChartQA accuracy does not move ($10.40\%\to10.32\%$) and its OCRBench accuracy
-falls ($1.60\%\to1.10\%$), even though $6{,}500$ document and chart questions
-were added: exact copying is not a data problem for the baseline, it is a
-capability it already has and the added data does not improve. Second,
-\modelname{}'s geometry accuracy doubles ($1.83\%\to3.83\%$), so the added data
-is being used where the architecture supports the task. Operator-level
-modulation compresses the image into rotation parameters; it cannot maintain a
-per-character key-value memory, so copying a five-digit axis label fails for
-structural rather than statistical reasons.
+\paragraph{Format boundary.}
+Retraining on $28$k \emph{+open} ($+6{,}500$ doc/chart pairs and $+2{,}101$
+geometry items, Tab.~\ref{tab:supp_boundary}) doubles \modelname-Tower geometry
+accuracy ($1.83\%{\to}3.83\%$), whereas ChartQA ($10.40\%{\to}10.32\%$) and
+OCRBench ($1.60\%{\to}1.10\%$) stay flat even for full-token LLaVA-Proj.
+Because operator modulation encodes images into rotation parameters rather than
+a per-character KV memory, dense transcription remains outside the zero-token
+regime.
 
-Finally, to disentangle genuine visual grounding from label-prior adaptation
-and verify every design choice under strict frozen-backbone auditing, we
-evaluated all three tiers on the $44$k debiased mixture with unified greedy
-decoding and zero-shot relaxed ChartQA scoring (Tab.~\ref{tab:grounding}). Three
-positive conclusions follow. First, restricting dynamic rotations to the five
-residual-stream entry projections with Lie-algebra tangent bounding
-($\tau_{\mathrm{rot}}{=}0.12$) eliminates the decoding instability of unbounded
-rotations: \modelname-Tower progresses monotonically from single-frequency
-rotation ($R_1$: $19.63\%$ Avg6, $40.70\%$ MC2) to multi-frequency rotation
-($R_2$: $20.18\%$ Avg6, $41.71\%$ MC2, $35.44\%$ Core3) and question-conditioned
-multi-frequency rotation ($R_3$: $9.52\%$ ChartQA, $0.70\%$ OCRBench; $20.28\%$
-Avg6 at $s{=}1$), outperforming both single-frequency ROSE ($15.70\%$ Avg6,
-$37.11\%$ MC2) and cross-attention alone ($19.59\%$ Avg6, $40.21\%$ MC2), while
-restoring free-form generation from $11.79\%$ to $40.89\%$--$41.67\%$ MC2
-($99.9\%$--$100.0\%$ EOS termination). Second, combining the shallow \texttt{rots}
-($K{=}4$) frontend with bounded multi-frequency rotation yields a large
-synergistic gain over pairing \texttt{rots} with cross-attention alone: validation
-CE drops from $1.835$ to $1.155$, validation $1{,}000$-item exact match jumps
-from $26.4\%$ to $40.8\%$, and the grounding gap expands $2.24\times$ over
-$K{=}0$ ($0.152$ vs.\ $0.068$ nats), while outperforming $K{=}4$ LoRA ($S_1$)
-across validation CE, gap, exact match, and public MMStar ($28.87\%$ vs.\
-$27.93\%$). At $4{,}096$ patches, skipping $\text{down}/\text{out}$ rotations
-further lowers \modelname-Free{} prefill latency to $101.9$\,ms ($20.0\%$ faster
-than LLaVA-Proj's $127.2$\,ms) and compute to $2.67$ TFLOPs ($-72.5\%$). Third,
-Step~2 distillation on top of \modelname-Free{} ($S_2$) pushes the tower-free
-model to $20.08\%$ Avg6 and $35.32\%$ Core3 ($M_1$, $99.6\%$ of $44$k
-full-token LLaVA-Proj's $35.45\%$ Core3) and $40.94\%$ MC2 ($M_0$, above
-LLaVA-Proj's $40.33\%$), while on-policy forward-KL VL-OPD ($M_2$) preserves
-$40.8\%$ validation exact match (vs.\ $39.9\%$ for off-policy KD) and achieves
-the highest tower-free MathVista accuracy ($24.90\%$, $+1.40$ over $M_0$). On
-MMStar, cross-image shuffle deltas remain small across all frozen-backbone
-models at this $44$k scale (including LLaVA-Proj: $28.60\%$ real vs.\ $28.00\%$
-shuffled), confirming that web-scale pretraining is needed for strong zero-shot
-spatial sensitivity across every open category.
+\paragraph{Debiased $44$k auditing.}
+Tab.~\ref{tab:grounding} evaluates all three tiers under the leakage-free,
+label-balanced $44$k mixture. Three findings emerge:
+(1) Bounding dynamic rotations to the five residual-stream entry projections
+($\tau_{\mathrm{rot}}{=}0.12$) eliminates unbounded-rotation decoding collapse
+($11.79\%{\to}40.89\%$--$41.67\%$ MC2 and $99.9\%$--$100.0\%$ EOS under
+\texttt{--force-gen}). Continuing from \texttt{CA-Only} for $800$ steps,
+$3$-seed means improve monotonically from $R_1$ ($19.31\%$ Avg6 / $34.56\%$
+Core3) to $R_2$ ($19.52\%$ / $34.76\%$) and $R_3$ ($19.61\%$ / $34.85\%$),
+with $R_3$ reaching $9.52\%$ ChartQA and $0.70\%$ OCRBench at $s{=}0$ and
+beating ROSE ($15.70\%$ Avg6) and \texttt{CA-Only} ($19.59\%$).
+(2) Combining RVE (\texttt{rots}, $K{=}4$) with bounded \texttt{mf} rotation
+($S_2$) yields strong synergy over \texttt{rots}+CA ($F_2$): validation CE
+drops $1.835{\to}1.155$, EM jumps $26.4\%{\to}40.8\%$, and grounding gap
+grows $2.24\times$ over $K{=}0$ ($0.152$ vs.\ $0.068$), outperforming $K{=}4$
+LoRA ($S_1$) on CE, EM, gap, and MMStar ($28.87\%$ vs.\ $27.93\%$). In this
+full \texttt{qcond}+\texttt{direct\_hyb} configuration at $4{,}096$ patches,
+omitting $\mathrm{o}/\mathrm{down}$ rotations reduces \modelname-Free{} prefill
+latency from $108.9$\,ms to $101.9$\,ms ($19.9\%$ faster than matched
+LLaVA-Proj's $127.2$\,ms) and compute to $2.67$ TFLOPs ($-72.5\%$).
+(3) In Step~2 over $S_2$, offline refinement ($M_0/M_1$) reaches $40.94\%$ MC2
+and $35.32\%$ Core3 ($99.6\%$ of $44$k LLaVA-Proj), while \texttt{Fwd-KL VL-OPD}
+($M_2$) retains the top validation EM ($40.8\%$ vs.\ $39.9\%$ off-policy KD)
+and highest tower-free MathVista ($24.90\%$, $+1.40$ over $M_0$). Across all
+frozen-backbone models including LLaVA-Proj ($28.60\%$ real vs.\ $28.00\%$
+shuffled), MMStar cross-image deltas remain small at $44$k, pointing to
+web-scale pretraining as future work.

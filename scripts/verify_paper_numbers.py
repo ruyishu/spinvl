@@ -87,6 +87,9 @@ def main():
     BENCH, TLOG, V5, V6 = ROOT / "results/benchmarks", ROOT / "results/train_logs", ROOT / "results/clean_v5", ROOT / "results/clean_v6"
     PRES = ROOT / "results/paper_results.json"
     tex_text = TEX_PATH.read_text(encoding="utf-8")
+    suppl_path = TEX_PATH.parent / "X_suppl.tex"
+    if suppl_path.exists():
+        tex_text = tex_text + "\n" + suppl_path.read_text(encoding="utf-8")
     checks = 0
 
     # 1. Table 1 (tab:main)
@@ -126,8 +129,9 @@ def main():
             assert_rounded(f"Tab1:{name}", k, s[k], cells[idx], decimals=2)
             checks += 1
 
-    # 2. Table 2 (tab:scale: single runs + 3-seed mean/std rows)
-    t2_rows = extract_table_block(tex_text, "tab:scale")[1:]
+    # 2. Table 2 (tab:scale or tab:supp_scale: single runs + 3-seed mean/std rows)
+    t2_label = "tab:supp_scale" if "\\label{tab:supp_scale}" in tex_text else "tab:scale"
+    t2_rows = extract_table_block(tex_text, t2_label)[1:]
     t2_spec = [
         ("0.6B Tower 28k s0", [BENCH / "q06_p15_tower_hybrid_ce.json"]),
         ("0.6B Free 21k s0", [BENCH / "q06_free_ce.json"]),
@@ -198,8 +202,9 @@ def main():
         assert_rounded(f"Tab3:{name}", "avg6", bs["avg6"], cells[9], decimals=2)
         checks += 7
 
-    # 4. Table 4 (tab:depth: all 5 rows including 3-seed mean row)
-    t4_rows = extract_table_block(tex_text, "tab:depth")[1:]
+    # 4. Table 4 (tab:depth or tab:supp_depth: all 5 rows including 3-seed mean row)
+    t4_label = "tab:supp_depth" if "\\label{tab:supp_depth}" in tex_text else "tab:depth"
+    t4_rows = extract_table_block(tex_text, t4_label)[1:]
     t4_single = [
         (0, "K=0 s0", [TLOG / "p18_q17_free_hyb_K0_joint.json"], [BENCH / "q17_p18_free_hyb_K0.json"]),
         (1, "K=2 s0", [TLOG / "p18_q17_free_hyb_K2_joint.json"], [BENCH / "q17_p18_free_hyb_K2.json"]),
@@ -278,8 +283,9 @@ def main():
         assert_rounded(f"TabEff:{erow['N_patches']}", "saving", sav_expected, sav_str, decimals=1)
         checks += 1
 
-    # 7. Table 7 (tab:boundary)
-    t6_rows = extract_table_block(tex_text, "tab:boundary")[1:]
+    # 7. Table 7 (tab:boundary or tab:supp_boundary)
+    t6_label = "tab:supp_boundary" if "\\label{tab:supp_boundary}" in tex_text else "tab:boundary"
+    t6_rows = extract_table_block(tex_text, t6_label)[1:]
     t6_files = [
         ("LLaVA 21k", BENCH / "q17_proj_n21000.json"),
         ("SpinVL-Tower 21k", BENCH / "q17_tower_hybrid_ce.json"),

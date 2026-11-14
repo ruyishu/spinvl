@@ -1,231 +1,191 @@
 \section{Method}
 \label{sec:method}
 
-\subsection{Overview and Notation}
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.92\textwidth]{spinvl_method.pdf}
+    \caption{\textbf{Overview of \modelname{} and VL-OPD.}
+    \textbf{(a)} RVE encodes image patches into visual cells via static
+    rotations and channel scaling in frozen shallow LLM layers. SAVM combines
+    bounded, question-conditioned multi-frequency rotations with spatial retrieval
+    to modulate frozen language projections with zero visual tokens in deeper
+    self-attention.
+    \textbf{(b)} Both teacher and student score identical student rollouts;
+    forward KL, gold cross-entropy, and cell alignment update only RVE and SAVM.}
+    \label{fig:method}
+\end{figure*}
+
+\subsection{Overview}
 \label{sec:overview}
 
-Let $f_\theta$ be a frozen pure-text LLM with $L$ layers and hidden width
-$d$, and let $\mathcal{S}\subset\{1,\dots,L\}$ be the set of layers we
-modulate. An image is processed into $N$ patches by the teacher's image
-processor. \modelname{} never places those patches inside the context of the
-deeper layers. Instead, it produces a compact set of cell features
-$V\in\mathbb{R}^{N_c\times d_v}$ and uses them to rotate the inputs of the
-seven linear projections ($q,k,v,o,\text{gate},\text{up},\text{down}$) in
-layers $\mathcal{S}$, as illustrated in Fig.~\ref{fig:arch}.
+Given an image $I$ and question $q$, \modelname{} adapts a frozen $L$-layer text
+LLM $f_\theta$ (width $d$) to generate an answer $y$. Rotational Visual Encoding
+(RVE, parameters $\phi$) reuses the first $K$ frozen layers to convert image
+patches into visual cells $V\in\mathbb{R}^{N_c\times d_v}$. Spatially Aware
+Visual Modulation (SAVM, parameters $\psi$) maps $V$ to projection modulations
+and spatial retrieval residuals across a layer subset $\mathcal{S}$:
+\begin{equation}
+V=E_\phi(I,\theta_{1:K}),
+\qquad
+\pi_S(y\mid I,q)=f_{\theta,\psi}(y\mid q,V).
+\label{eq:overview}
+\end{equation}
+Visual encoding and text decoding run in separate passes with shared shallow
+weights: text tokens traverse all $L$ layers without appended visual tokens
+(Figure~\ref{fig:method}(a)). We call this tower-free model \modelname-Free,
+while \modelname-Tower supplies $V$ from a frozen external vision encoder into
+the same SAVM interface.
 
-Two model variants share this skeleton. \emph{\modelname-Tower} takes $V$
-from a frozen external vision encoder and is the direct successor of
-rotation-based injection. \emph{\modelname-Free} additionally deletes the
-encoder: $V=\hat{v}$ is produced by the student's own first $K$ layers, and
-all image tokens are dropped afterwards. Both variants are followed by the
-same on-policy distillation stage.
-
-\subsection{Tier 1: Built-in Vision Frontend}
+\subsection{Rotational Visual Encoding}
 \label{sec:frontend}
 
-\paragraph{Static rotation with channel scaling.}
-A pure orthogonal rotation preserves norms and angles but cannot change
-singular values, so it can re-aim features without re-weighting channels. For a
-linear projection $y = x W^{\top} + b$, we first rotate each $b$-dimensional
-input block and then apply a learned per-channel diagonal scaling
-$d\in\mathbb{R}^{d_{\text{in}}}$ before multiplying by $W^{\top}$, i.e.\
-$y = ((x R_{\mathrm{s}})\odot d)W^{\top} + b$, which is equivalent to the
-transformed weight
+\paragraph{Shared shallow encoding.}
+An image is split into $N$ patches $\{p_i\}_{i=1}^{N}$ and embedded with
+learnable row and column codes:
 \begin{equation}
-W' = W\,\mathrm{diag}(d)\,R_{\mathrm{s}}^{\top},
-\qquad
-R_{\mathrm{s}} = (I-A)^{-1}(I+A),
+h_i^{(0)}=\operatorname{Linear}_{\mathrm{patch}}(p_i)+e^{\mathrm{row}}_{r_i}+e^{\mathrm{col}}_{c_i}.
+\label{eq:patch}
+\end{equation}
+RVE passes $\{h_i^{(0)}\}$ through the first $K$ frozen LLM layers under
+bidirectional attention with the backbone's rotary positions~\citep{su2024roformer}.
+
+\paragraph{Static rotation and channel scaling.}
+RVE adapts the input coordinates of each shallow attention and FFN linear
+projection $(W,\beta)$ via a static block-diagonal rotation and channel-wise
+scale:
+\begin{equation}
+y=\bigl(xR_{\mathrm s}\operatorname{diag}(s)\bigr)W^\top+\beta,
+\quad
+R_{\mathrm s}=\operatorname{blkdiag}_{r}\bigl(\operatorname{Cayley}(A_r^{\mathrm s})\bigr),
 \label{eq:static}
 \end{equation}
-where $A$ is skew-symmetric, $R_{\mathrm{s}}\in SO(b)$ acts on $b{=}64$
-channel blocks, and $d\in\mathbb{R}^{d_{\text{in}}}$ is initialised to ones.
-Because $R_{\mathrm{s}}$ is orthogonal, training stays well conditioned and
-the rescaling supplies the degrees of freedom that orthogonality removes. For
-$K{=}4$ layers and seven projections on a $1.7$B backbone, the static
-in-layer module has $2.40$M parameters (versus $2.49$M for rank-$16$ LoRA and
-$201$M for duplicating the four layers), while all encoder-free variants share
-the same $3.67$M patch/positional embedding and $50.36$M $2{\times}2$ cell
-merger ($56.42$M vs.\ $56.52$M total frontend parameters).
+where $\operatorname{Cayley}(A)=(I-A)^{-1}(I+A)$ maps each skew-symmetric
+$A_r^{\mathrm s}\in\mathbb{R}^{b\times b}$ onto an orthogonal
+matrix~\citep{golub2013matrix}. Initialized at $A_r^{\mathrm s}{=}0$ and
+$s{=}\mathbf{1}$, $R_{\mathrm s}$ aligns channel directions while $s$ rescales
+feature magnitudes.
 
-\paragraph{Reading the image once.}
-Image patches are linearly embedded and given row and column positional
-embeddings. They are then propagated through the student's first $K$ layers
-with \emph{bidirectional} attention under Eq.~\eqref{eq:static}, which lets
-every patch see the whole image---the regime a vision encoder needs and the
-regime a causal LLM never provides. Adjacent $2\times2$ patches are
-concatenated and projected by a two-layer merger into one cell feature,
+\paragraph{Visual cell formation.}
+From the $K$-th layer patch states $H^{(K)}$, local groups
+$\{\mathcal{G}_j\}_{j=1}^{N_c}$ of $m$ adjacent patches are merged into
+$N_c{=}N/m$ visual cells $V=[v_1,\ldots,v_{N_c}]^\top$:
 \begin{equation}
-\hat{v} = \mathrm{MLP}\big(\mathrm{LN}([h_{4i},h_{4i+1},h_{4i+2},h_{4i+3}])\big)
-\in\mathbb{R}^{d_v},
+v_j=\operatorname{MLP}_{\mathrm{merge}}\!\left(
+\operatorname{LN}\!\left(
+\operatorname{Concat}_{i\in\mathcal{G}_j}h_i^{(K)}
+\right)\right).
 \label{eq:merge}
 \end{equation}
-yielding $\hat{v}\in\mathbb{R}^{N_c\times d_v}$ with $N_c=N/4$.
+Patch tokens terminate at this shallow interface and never enter deeper
+self-attention.
 
-\paragraph{Discard, then modulate.}
-After Eq.~\eqref{eq:merge} the $N$ image patch tokens are deleted: the text
-sequence of length $T$ is then processed through all $L$ layers of the frozen
-LLM without any visual tokens in its self-attention sequence (paying
-$O(K N^2 + L T^2)$ attention instead of $O(L(T+N_c)^2)$). The only trace of the
-image during the text pass is $\hat{v}\in\mathbb{R}^{N_c\times d_v}$, which
-drives the deep modulation of Sec.~\ref{sec:dynamic}. This separates our
-two-phase design from built-in-encoder approaches that keep visual tokens in the
-sequence across all $L$ layers.
-
-\paragraph{Optional feature supervision.}
-When a teacher encoder is available during training we align $\hat{v}$ with
-its cell features $v^{\ast}$ through
-\begin{equation}
-\mathcal{L}_{\mathrm{feat}} = \frac{1}{N_c}\sum_{i}\Big[(1-\cos(\hat v_i,v^\ast_i))
-+ \lambda_1\,\ell_{\mathrm{smooth}}\big(\tfrac{\hat v_i}{s},\tfrac{v^\ast_i}{s}\big)\Big],
-\label{eq:feat}
-\end{equation}
-with $s=\mathrm{std}(v^\ast)$ and $\lambda_1{=}0.5$. This term only shapes the
-frontend during training; it is not needed at inference and, as we show in
-Sec.~\ref{sec:abl}, the model still learns to read images when it is
-switched off entirely.
-
-\subsection{Tier 2: Dynamic Rotation Injection}
+\subsection{Spatially Aware Visual Modulation}
 \label{sec:dynamic}
 
-\paragraph{Generating a rotation per layer.}
-For a layer $\ell\in\mathcal{S}$ we keep $N_b$ learnable queries
-$Q_\ell\in\mathbb{R}^{N_b\times d_q}$ ($d_q{=}256$). Optionally, under
-\emph{question conditioning} (\texttt{qcond}), the mean-pooled prompt hidden
-state $\bar x_{\text{prompt}}$ at layer $\ell$ is projected by a
-zero-initialised linear layer $W_{qc}^{(\ell)}\mathrm{LN}(\bar x_{\text{prompt}})$
-and added to $Q_\ell$ so the rotation queries depend on the question as well as
-the image. Visual cell features $V\in\mathbb{R}^{N_c\times d_v}$ are
-projected to keys and values, and the queries read out a context
+\paragraph{Question-conditioned multi-frequency bounded rotation.}
+For each modulated layer $\ell\in\mathcal{S}$, the target linear projections
+have $B_\ell{=}\sum_p d_p/b$ input blocks of size $b$. A learnable query bank
+$Q_\ell\in\mathbb{R}^{B_\ell\times d_q}$ is partitioned into low-, mid-, and
+high-frequency groups. To condition visual routing on the prompt $q$
+(\texttt{qcond}), a zero-initialized projection maps the layer-normalized mean
+prompt state $\bar{x}_q$ onto the queries,
+$\widetilde{Q}_\ell=Q_\ell+\operatorname{Linear}_{\mathrm{qc},\ell}(\operatorname{LN}(\bar{x}_q))$.
+Linear projections map $V$ to keys $K_\ell$ and values $U_\ell$ of width $d_q$;
+the low-frequency group reads spatial means $(\bar{K}_\ell,\bar{U}_\ell)$, while
+mid- and high-frequency groups attend to all cells augmented with slow and fast
+sinusoidal position codes $P_g$:
 \begin{equation}
-C_\ell = \mathrm{MHA}\big(Q_\ell,\; W_k^{(\ell)}V,\; W_v^{(\ell)}V\big),
-\qquad
-\theta_\ell = W_o^{(\ell)}C_\ell ,
-\label{eq:ctx}
+C_{\ell,g}=\operatorname{softmax}\!\left(
+\frac{\widetilde{Q}_{\ell,g}K_{\ell,g}^\top}{\tau_g\sqrt{d_q}}
+\right)U_{\ell,g},
+\label{eq:frequency_context}
 \end{equation}
-where $\theta_\ell\in\mathbb{R}^{N_b\times b(b-1)/2}$ collects the strictly
-lower-triangular entries of the skew-symmetric blocks. To prevent large-angle
-rotations from distorting the frozen LLM's post-attention head-concatenation
-($o$) and high-dimensional post-SwiGLU ($\text{down}$) manifolds during
-autoregressive decoding, we apply dynamic rotations to the five residual-stream
-entry projections ($q,k,v,\text{gate},\text{up}$) and bound the skew-symmetric
-generator in the Lie algebra $\mathfrak{so}(b)$ with radius
-$\tau_{\mathrm{rot}}{=}0.12$:
+with $\tau_{\mathrm{high}}<\tau_{\mathrm{mid}}$ focusing high-frequency blocks
+on fine local regions. Each row $c_{\ell,p,r}$ of the concatenated context
+$C_\ell$ predicts raw skew coefficients
+$a_{\ell,p,r}=\operatorname{Linear}_{\mathrm{rot},\ell}(c_{\ell,p,r})$. To
+prevent excessive coordinate drift during autoregressive decoding, we apply
+Lie-algebra tangent bounding in our $44$k audited runs and modulate only the five
+residual-stream entry projections $p\in\{\mathrm{q,k,v,gate,up}\}$ (skipping
+$\mathrm{o}$ and $\mathrm{down}$):
 \begin{equation}
-A_r = \frac{\tau_{\mathrm{rot}}}{\sqrt{b}}\Big(\mathrm{tril}(\tanh\theta_{\ell,r}) - \mathrm{tril}(\tanh\theta_{\ell,r})^{\top}\Big),
-\qquad
-R_{\ell,r} = (I-A_r)^{-1}(I+A_r),
+A_{\ell,p,r}=\frac{\tau_{\mathrm{rot}}}{\sqrt{b}}
+\bigl(\mathcal{T}(\tanh a_{\ell,p,r})-\mathcal{T}(\tanh a_{\ell,p,r})^\top\bigr),
+\;\;
+R_{\ell,p,r}=\operatorname{Cayley}(A_{\ell,p,r}),
 \label{eq:cayley}
 \end{equation}
-which preserves exact orthogonality ($R_{\ell,r}^{\top}R_{\ell,r}=I$) while
-bounding $\|R_{\ell,r}-I\|_2$ and saving the $6144$-dimensional $\text{down}$
-projection rotation cost. A rotated projection computes
+where $\mathcal{T}$ fills the strictly lower triangle and $\tau_{\mathrm{rot}}{=}0.12$
+(unbounded $a_{\ell,p,r}$ across all seven projections in $21$k/$28$k reference
+runs). For projections of input width $d$, a token-wise gate
+$g_{\ell,p}(x)=2\sigma(\operatorname{Linear}_{\mathrm{gate},\ell}(x))_{\mathcal{I}_p}$
+modulates each block as
 \begin{equation}
-y = \big(x\,R_{\ell}\big)W^{\top}+b,
-\qquad
-R_\ell = \mathrm{blkdiag}(R_{\ell,1},\dots,R_{\ell,N_b}),
-\label{eq:rotlin}
-\end{equation}
-with $x$ split into $N_b$ channel blocks. All modulated projections of a layer
-share the same visual context, which is computed once and cached for the whole
-forward pass, so generation pays for the rotation generator once per layer
-rather than once per step.
-
-\paragraph{Multi-frequency rotation (\texttt{mf}).}
-A single pooled context forces every block to look at the image through the
-same aperture. We split the $N_b$ blocks into three bands, following the
-frequency division of rotary position embeddings~\citep{su2024roformer}. 
-Low-frequency blocks attend to the globally pooled feature $\bar v$;
-mid-frequency blocks
-attend to all cells with a smooth positional encoding
-($\mathrm{base}{=}10^4$); high-frequency blocks use a rapidly varying encoding
-($\mathrm{base}{=}50$, softmax temperature $\tau{=}0.25$) to sharpen
-localisation. A zero-initialised gate then mixes rotation with identity,
-\begin{equation}
-\tilde x_r = x_r + 2\sigma\big(W_g x\big)_r\,\big(x_rR_{\ell,r}-x_r\big),
+\widetilde{x}_r=x_r+g_{\ell,p,r}(x)\bigl(x_rR_{\ell,p,r}-x_r\bigr).
 \label{eq:gate}
 \end{equation}
-so the model starts from the pretrained function and adds rotation only where
-it helps. This variant favours multi-step reasoning over diagrams, where the
-model must repeatedly consult a small region.
+Zero-initializing $\operatorname{Linear}_{\mathrm{rot},\ell}$ yields $R{=}I$,
+while the gate bias is initialized to $0$ ($g{=}1$) in unbounded runs and
+$-2.0$ ($g{\approx}0.24$) when $\tau_{\mathrm{rot}}{>}0$. The image-conditioned
+rotations are computed once per image and reused across all decoding steps.
 
-\paragraph{Spatial-anchor and direct narrow-subspace hybrid (\texttt{hyb} / \texttt{direct\_hyb}).}
-The second variant keeps the orthogonal rotation and adds a narrow-subspace
-cross-attention residual before the frozen linear projection,
+\paragraph{Spatial retrieval hybrid.}
+To supplement parameter rotation with explicit location-specific evidence, SAVM
+adds a narrow ($d_q{=}256$) cross-attention residual before the frozen linear map
+for projections of input width $d$:
 \begin{equation}
-\Delta x = W_{\mathrm{out}}\,
-\mathrm{MHA}\big(W_q\,\mathrm{LN}(x),\, K_a,\, V_a\big),
-\qquad
-y=\big(xR_\ell+\Delta x\big)W^{\top}+b,
+\Delta_\ell(x)=\operatorname{Linear}_{\mathrm{out},\ell}\!\left(
+\operatorname{MHA}\bigl(q_\ell^a(x),\,K_\ell^a,\,U_\ell^a\bigr)
+\right),
 \label{eq:hyb}
 \end{equation}
-where $W_{\mathrm{out}}$ is zero-initialised. In the pooled-anchor variant
-(\texttt{hyb}), $K_a,V_a\in\mathbb{R}^{M\times d_q}$ come from $M{=}16$
-learnable spatial anchors pooled from $V$; in the uncompressed direct variant
-(\texttt{direct\_hyb}), $K_a,V_a\in\mathbb{R}^{N_c\times d_q}$ project all $N_c$
-visual cells directly into the $d_q{=}256$ narrow subspace (with a post-attention
-LayerNorm before $W_{\mathrm{out}}$). In both cases the cross-attention operates
-in $d_q{=}256\ll d$ and no visual token enters the LLM's self-attention KV
-cache. To isolate the contribution of orthogonal rotation from this additive
-cross-attention path, we also evaluate a strict \emph{cross-attention-only}
-ablation (\texttt{no\_rot}, $R_\ell\equiv I$, removing the rotation generator
-entirely).
+\begin{equation}
+y_{\ell,p}=\bigl(\widetilde{x}+\Delta_\ell(x)\bigr)W_{\ell,p}^\top+\beta_{\ell,p},
+\label{eq:hybrid_projection}
+\end{equation}
+where $q_\ell^a(x)=\operatorname{Linear}_{q,\ell}(\operatorname{LN}(x))$ and
+$\operatorname{Linear}_{\mathrm{out},\ell}$ is zero-initialized. In the
+$21$k/$28$k lightweight configuration (\texttt{hyb}), $(K_\ell^a,U_\ell^a)$ are
+$M$ learnable spatial anchors pooled from $V$; in the $44$k audited
+configuration (\texttt{direct\_hyb}), text states query all positional visual
+cells directly in the narrow $d_q$ subspace without anchor compression,
+retaining full spatial granularity while keeping deeper self-attention free of
+visual tokens.
 
-All variants are controlled by explicit flags while the LLM backbone stays
-strictly frozen.
-
-\subsection{Modality Decoupling}
-\label{sec:decouple}
-
-The rotations act through a context-local wrapper that is active only inside
-the image branch. When no visual context is set, each wrapped projection calls
-its original weight, so a text-only input follows exactly the computation of
-the unmodified LLM and produces bit-identical logits. This is what allows
-\modelname{} to claim lossless text ability while still being trained on image
-data. It also explains a negative result we report in
-Sec.~\ref{sec:eff}: any variant that merges vision adapters into the text
-pathway---LoRA, static rotation, or rotation with scaling---loses most of its
-arithmetic ability, which is why the decoupled design is not a convenience but
-a requirement.
-
-\subsection{Step 2: Online Policy Distillation}
+\subsection{Training Strategy and Properties}
 \label{sec:opd}
 
-Teacher-forced training only visits prefixes of ground-truth answers. Greedy
-decoding visits the student's own prefixes, where a small early error moves
-the hidden state off the training manifold; rotation-injected models are
-particularly sensitive because the rotation is conditioned on the current
-hidden state itself. We therefore distil on-policy.
+\paragraph{Three-stage cold start.}
+With $\theta$ frozen throughout, \modelname-Free is trained in three stages:
+\emph{Stage~1} initializes SAVM ($\psi$) from frozen teacher cells $V^\ast$ via
+gold-answer cross-entropy $\mathcal{L}_{\mathrm{CE}}$; \emph{Stage~2} pretrains
+RVE ($\phi$) alone to align its cells $V$ to $V^\ast$ via cosine and normalized
+Smooth-L1 loss $\mathcal{L}_{\mathrm{feat}}
+=\frac{1}{N_c}\sum_i[1-\cos(v_i,v_i^\ast)+\lambda_{\mathrm{s}}\ell_{\mathrm{smooth}}(v_i/s_\ast,v_i^\ast/s_\ast)]$,
+with $s_\ast{=}\max(\operatorname{std}(V^\ast),\epsilon)$; and \emph{Stage~3}
+jointly optimizes $(\phi,\psi)$ under $\mathcal{L}_{\mathrm{CE}}+\lambda_{\mathrm{feat}}\mathcal{L}_{\mathrm{feat}}$.
 
-Let $\hat y_{1:T}\sim\pi_S(\cdot\mid I,q)$ be a rollout sampled from the
-student with the vision context active. A frozen teacher VLM
-$\pi_T$ (an instruction-tuned model of the same tokenizer family) scores the
-\emph{same} trajectory in one forward pass, giving
+\paragraph{VL-OPD.}
+To bridge teacher-forced training and autoregressive decoding, the student
+generates rollouts $\hat{y}_{1:\hat{T}}\sim\pi_S(\cdot\mid I,q)$ and a frozen
+teacher VLM $\pi_T$ scores the same prefixes (Figure~\ref{fig:method}(b)).
+With temperature-scaled distributions $p_{a,t}^\tau=\operatorname{softmax}(z_{a,t}/\tau)$,
+the on-policy distillation objective is
 \begin{equation}
-\mathcal{L}_{\mathrm{OPD}}=
-\mathbb{E}_{\hat y}\Big[\sum_{t=1}^{T}
-\mathrm{KL}\!\left(\pi_T(\cdot\mid I,q,\hat y_{<t})\,\Big\|\,
-\pi_S(\cdot\mid I,q,\hat y_{<t})\right)
-+\lambda_{\mathrm{ce}}\,\mathcal{L}_{\mathrm{CE}}\Big],
+\mathcal{L}_{\mathrm{OPD}}=\mathbb{E}_{\hat{y}\sim\pi_S}\!\left[
+\frac{\tau^2}{\hat{T}}\sum_{t=1}^{\hat{T}}
+\operatorname{KL}\!\left(p_{T,t}^\tau\,\|\,p_{S,t}^\tau\right)\right],
 \label{eq:opd}
 \end{equation}
-where the cross-entropy term anchors the model to gold tokens that appear in
-the rollout. For \modelname-Free{} we add Eq.~\eqref{eq:feat} with a small
-weight to keep $\hat v$ stable while the frontend is updated. Training uses
-$500$ steps, batch size $4$, learning rates $2\times10^{-5}$ (rotation) and
-$10^{-5}$ (frontend), and takes under fifteen minutes on one GPU. The
-distillation is thus a cheap post-hoc stage rather than a second training run.
+combined with gold cross-entropy and cell alignment as
+$\mathcal{L}_{\mathrm{train}}=\lambda_{\mathrm{opd}}\mathcal{L}_{\mathrm{OPD}}+\lambda_{\mathrm{ce}}\mathcal{L}_{\mathrm{CE}}+\lambda_{\mathrm{feat}}\mathcal{L}_{\mathrm{feat}}$
+(\modelname-Tower updates only $\psi$ and omits $\mathcal{L}_{\mathrm{feat}}$).
 
-\subsection{Complexity}
-\label{sec:complexity}
-
-For a text length $T$ and $N$ visual patches, a token-concatenation layer
-attends over $T+N$ positions, costing $O((T+N)^2d)$; the visual part alone is
-$O(2TNd+N^2d)$ and is paid in every layer. \modelname{} pays $O(N^2d)$ for
-$K$ early layers in the frontend and, in the remaining $L-K$ layers, only
-$O(T^2d)$ for self-attention plus $O(TN d_q)$ for the anchor residual, with
-$d_q\ll d$. The block rotations add $O(Tdb)$, independent of both $N$ and the
-number of projections' output width in the leading term. Measured at $4096$
-patches the total drops from $9.85$ to $2.54$ TFLOPs
-(Tab.~\ref{tab:eff}), and because the frontend encodes patches once with
-bidirectional attention, wall-clock latency at high resolution improves as
-well.
+\paragraph{Modality decoupling and complexity.}
+For text-only inputs, bypassing RVE and SAVM executes the untouched backbone
+$f_\theta(y\mid q)$ verbatim (\texttt{logits\_diff}\,{=}\,$0$, zero language
+degradation). For multimodal inputs with $N$ patches and $T$ text tokens,
+token concatenation incurs $O(L(T{+}N)^2)$ attention across all $L$ layers and
+$O(LN)$ visual KV cache. \modelname-Free restricts $O(N^2)$ patch attention to
+the first $K{\ll}L$ layers and keeps deeper layers at length $T$, yielding
+$O(KN^2{+}LT^2)$ attention with zero deep visual KV cache (Sec.~\ref{sec:supp_arch}).

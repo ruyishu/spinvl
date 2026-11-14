@@ -1,59 +1,70 @@
 \section{Related Work}
 \label{sec:related}
 
-\paragraph{Token-concatenation VLMs.}
-LLaVA-style models connect a pretrained vision encoder to an LLM through a
-light projector and train on instruction data~\citep{liu2023llava,
-liu2024improved}. Scaling this recipe mostly means scaling the visual token
-count, which is precisely what makes inference expensive at high resolution.
-Token-pruning and spatial-pooling methods such as FastV~\citep{chen2024fastv}
-and locality-aware projectors~\citep{cha2024honeybee} compress the visual sequence
-to a smaller token budget, but still keep visual tokens inside every backbone layer.
-Our baselines cover both full-token concatenation and $32$-token pruning/pooling
-under our exact data and compute budget so that comparisons are apples-to-apples.
+\paragraph{Multimodal Large Language Models.}
+MLLMs extend pretrained language models with visual perception through
+learned cross-modal interfaces. Image--text pretraining in
+CLIP~\citep{radford2021clip} and SigLIP~\citep{zhai2023siglip} provides
+transferable visual representations for these systems.
+Flamingo~\citep{alayrac2022flamingo} bridges frozen vision and language
+models through a visual resampler and gated cross-attention, while
+BLIP-2~\citep{li2023blip2} learns a querying transformer to connect frozen
+encoders and LLMs. LLaVA~\citep{liu2023llava} and its improved
+baseline~\citep{liu2024improved} establish visual instruction tuning as an
+effective approach to multimodal alignment and instruction following.
+InternVL~\citep{chen2024internvl} scales visual representation learning and
+cross-modal alignment, while the Qwen-VL
+family~\citep{bai2023qwenvl,bai2025qwen25vl,bai2025qwen3vl} advances visual
+understanding, localization, and text reading. Alongside these gains,
+research has documented language capability degradation after visual
+instruction tuning and explored preference alignment to restore
+it~\citep{li2024multimodalpreference}.
+\modelname{} adds vision through trainable interfaces around a frozen LLM
+and bypasses these interfaces for text-only inputs, preserving the
+original computation without requiring subsequent language recovery.
 
-\paragraph{Parameter-efficient and encoder-free adaptation.}
-Encoder-free VLMs internalise visual processing into the LLM by duplicating
-modality-specific weights~\citep{diao2024eve} or inserting low-rank
-adapters~\citep{hu2021lora,vora2025} into the early layers and distilling a
-vision tower. While this removes the external ViT, unfreezing copied layers
-requires hundreds of millions of parameters, and permanently merging additive
-adapters into a text model destroys arithmetic reasoning, which motivates a
-multiplicative, context-gated form of adaptation.
+\paragraph{Efficiency Optimization for MLLMs.}
+Efficiency methods reduce visual sequence length, model size, or the cost
+of modality-specific components. Honeybee~\citep{cha2024honeybee} and
+TokenPacker~\citep{li2025tokenpacker} condense visual features through
+projectors that retain local detail. FastV~\citep{chen2024fastv} prunes
+visual tokens within the language backbone, whereas
+LLaVA-PruMerge~\citep{shang2025prumerge} and
+VisionZip~\citep{yang2025visionzip} select and merge visual features before
+language processing. Compact architectures such as
+MobileVLM~\citep{chu2023mobilevlm} further reduce deployment costs through
+smaller language backbones and efficient projectors. Encoder-free
+approaches internalize image processing within the language decoder:
+EVE~\citep{diao2024eve} learns unified visual and linguistic
+representations, while VoRA~\citep{vora2025} uses
+LoRA~\citep{hu2021lora} in shallow language layers for visual encoding.
+These approaches remove the external tower but retain visual sequences
+in the decoder. Parameter-space injection offers a complementary route:
+VLoRA~\citep{ma2024vlora} converts visual features into low-rank weight
+updates, and ROSE~\citep{rose2025} generates image-conditioned orthogonal
+rotations, both avoiding visual tokens in language self-attention while
+relying on external visual encoders.
+The tower-free design of \modelname{} combines shared shallow encoding
+with spatially aware modulation to remove both the external vision tower and deep visual
+tokens at inference, reducing high-resolution computation while
+preserving the original text pathway.
 
-\paragraph{Rotation-based injection.}
-ROSE~\citep{rose2025} converts visual features into block-diagonal orthogonal
-matrices and rotates linear inputs, so the backbone never sees a visual token.
-The construction guarantees that activations preserve their norm, and it is
-attractive because the text model remains intact. Its limitations---a static,
-globally pooled rotation, dependence on an external tower, and exposure bias
-under greedy decoding---are the starting point of this work. We keep the
-orthogonal construction, make it dynamic and spatially addressable, remove the
-tower, and add on-policy distillation.
-
-\paragraph{Distillation for VLMs.}
-Knowledge distillation transfers a teacher's output distribution or feature
-geometry to a student~\citep{hinton2015distilling,park2019rkd}; sequence-level
-and on-policy variants~\citep{kim2016sequence,gu2024minillm,agarwal2024gkd}
-train on student-generated trajectories. Off-policy distillation on
-ground-truth prefixes does not cover the states a model visits when it decodes
-on its own, whereas mode-seeking reverse KL~\citep{gu2024minillm} or hard top-$1$
-sequence targets~\citep{kim2016sequence} can destabilise termination under
-multiplicative rotation. Token-level forward KL on student rollouts closes this
-gap and is the second step of our framework.
-
-\paragraph{Orthogonal parameterisation.}
-The Cayley transform $R=(I-A)^{-1}(I+A)$ maps a skew-symmetric matrix to a
-special orthogonal matrix~\citep{golub2013matrix} and has been used to
-stabilise recurrent and convolutional models. We use it to parameterise
-block-diagonal rotations that are cheap to generate, exactly orthogonal, and
-composable with a learned diagonal rescaling.
-
-\paragraph{Benchmarks.}
-We evaluate on general perception (MMStar~\citep{chen2024mmstar}), visual
-hallucination (HallusionBench~\citep{guan2024hallusionbench}), chart reasoning
-(ChartQA~\citep{masry2022chartqa}), scene-text understanding
-(OCRBench~\citep{liu2023ocrbench}), mathematical reasoning
-(MathVista~\citep{lu2024mathvista}), and plane geometry
-(Geometry3K~\citep{lu2021geometry3k}). Text retention is measured with GSM8K
-\citep{cobbe2021gsm8k} and ARC-Challenge~\citep{clark2018arc}.
+\paragraph{Knowledge Distillation for LLMs and MLLMs.}
+Knowledge distillation transfers output distributions or relational
+structure from a teacher to a student~\citep{hinton2015distilling,park2019rkd}.
+For multimodal models, LLAVADI~\citep{xu2024llavadi} studies feature- and
+logit-level alignment, while LLaVA-KD~\citep{cai2025llavakd} combines
+multimodal output distillation with visual-token relation transfer.
+MoVE-KD~\citep{cao2025movekd} consolidates complementary visual encoders
+into a single encoder through adaptive distillation. For autoregressive
+models, sequence-level KD~\citep{kim2016sequence} trains students on
+teacher-generated sequences, but training on fixed reference prefixes
+leaves a mismatch with the histories encountered during student
+generation~\citep{bengio2015scheduled,agarwal2024gkd}.
+MiniLLM~\citep{gu2024minillm} optimizes reverse KL using student-generated
+sequences, and GKD~\citep{agarwal2024gkd} matches teacher and student
+distributions on student rollouts with a choice of divergence.
+Building on on-policy distillation, \modelname{} combines image-conditioned
+forward KL with gold-answer supervision to refine its rotational visual
+interface on student rollouts, addressing the generation mismatch without
+updating the language backbone or adding inference modules.

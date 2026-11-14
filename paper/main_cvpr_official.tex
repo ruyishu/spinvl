@@ -1,58 +1,50 @@
-% =====================================================================
-% SpinVL -- CVPR submission draft (OFFICIAL CVPR KIT BUILD)
-%
-% Instructions:
-%   1. Download the official CVPR author kit and copy cvpr.sty,
-%      cvpr_eso.sty, and eso-pic.sty into this folder.
-%   2. Switch the mode below:  [review] -> camera-ready draft,
-%      [pagenumbers] for the numbered review copy (double-blind).
-%   3. Compile with:  pdflatex main_cvpr_official
-%                     bibtex  main_cvpr_official
-%                     pdflatex main_cvpr_official   (twice)
-%
-% The body sections are shared verbatim with main.tex.
-% =====================================================================
+% CVPR 2027 Paper Template; see https://github.com/cvpr-org/author-kit
+
 \documentclass[10pt,twocolumn,letterpaper]{article}
 
-\usepackage[pagenumbers]{cvpr} % anonymous review copy with page numbers
+%%%%%%%%% PAPER TYPE  - PLEASE UPDATE FOR FINAL VERSION
+% \usepackage{cvpr}              % To produce the CAMERA-READY version
+\usepackage[]{cvpr}      % To produce the REVIEW version
+% \usepackage[pagenumbers]{cvpr} % To force page numbers, e.g. for an arXiv version
 
-\usepackage{times}
-\usepackage{graphicx}
-\usepackage{amsmath,amssymb}
-\usepackage{booktabs}
-\usepackage{multirow}
-\usepackage{array}
-\usepackage{xcolor}
-\usepackage[font=small,labelfont=bf,textfont=small]{caption}
-\usepackage[numbers,sort&compress]{natbib}
-\usepackage[hidelinks]{hyperref}
+% Import additional packages in the preamble file, before hyperref
+\input{preamble}
 
-\graphicspath{{figures/}}
-\renewcommand{\arraystretch}{1.05}
+% It is strongly recommended to use hyperref, especially for the review version.
+% hyperref with option pagebackref eases the reviewers' job.
+% Please disable hyperref *only* if you encounter grave issues, 
+% e.g. with the file validation for the camera-ready version.
+%
+% If you comment hyperref and then uncomment it, you should delete *.aux before re-running LaTeX.
+% (Or just hit 'q' on the first LaTeX run, let it finish, and you should be clear).
+\definecolor{cvprblue}{rgb}{0.21,0.49,0.74}
+\usepackage[pagebackref,breaklinks,colorlinks,allcolors=cvprblue]{hyperref}
 
-\newcommand{\modelname}{SpinVL}
-\newcommand{\ie}{\emph{i.e.}}
-\newcommand{\eg}{\emph{e.g.}}
+\def\confName{CVPR}
+\def\confYear{2027}
 
-\title{\modelname: Turning Frozen Text LLMs into Vision-Language Models\\ with Zero Visual Tokens in the Backbone}
+%%%%%%%%% TITLE - PLEASE UPDATE
+\title{\modelname: Rotating Frozen LLMs into VLMs with On-Policy Distillation}
 
-\author{Anonymous CVPR submission\\Paper ID 0000}
+%%%%%%%%% AUTHORS - PLEASE UPDATE
+\author{Anonymous CVPR submission}
 
 \begin{document}
-
 \maketitle
-
-\input{sections/0_abstract}
-
-\input{sections/1_intro}
-\input{sections/2_related}
-\input{sections/3_method}
-\input{sections/4_experiments}
-\input{sections/5_conclusion}
-
-{\small
-\bibliographystyle{ieeenat_fullname}
-\bibliography{references}
+\input{sec/0_abstract}    
+\input{sec/1_intro}
+\input{sec/2_related}
+\input{sec/3_method}
+\input{sec/4_experiments}
+\input{sec/5_conclusion}
+{
+    \small
+    \bibliographystyle{ieeenat_fullname}
+    \bibliography{main}
 }
 
+% WARNING: do not forget to delete the supplementary pages from your submission 
+\input{sec/X_suppl}
+
 \end{document}
+    

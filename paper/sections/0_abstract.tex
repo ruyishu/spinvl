@@ -1,27 +1,24 @@
 \begin{abstract}
-Token-concatenation vision-language models (VLMs) suffer from quadratic
-attention scaling with image resolution and degraded pure-text reasoning when
-the backbone is updated. Parameter-rotation methods eliminate visual tokens
-from the backbone but still rely on a heavy external vision encoder and suffer
-from exposure bias during autoregressive decoding. We present \modelname, a
-two-step framework that turns a completely frozen text LLM into a VLM with
-\textbf{zero visual tokens in the deeper backbone} and \textbf{no external
-vision tower}. First, a \emph{dual-tier orthogonal rotation} architecture
-repurposes the student's first $K{=}4$ layers as a built-in vision encoder via
-static Cayley rotation and channel scaling ($2.4$M parameters), discards all
-image tokens after layer $K$, and modulates deeper frozen layers with dynamic
-block-diagonal rotations driven by multi-frequency or spatial-anchor queries.
-Modality decoupling keeps pure-text inference bit-exact ($70.4\%$ GSM8K),
-whereas merging vision adapters into the backbone collapses GSM8K to $0.0\%$.
-Second, \emph{online policy distillation} (VL-OPD) supervises student rollouts
-with token-level KL from a teacher VLM, boosting $0.6$B free-form generation
-by up to $+9.9$ points and lifting $1.7$B tower-free perception and
-anti-hallucination on the base mixture from $40.21\%$ to $42.46\%$. Under
-identical data, steps, and seed ($s{=}0$), \modelname{} surpasses a
-token-concatenation LLaVA baseline on perception and anti-hallucination
-($44.37\%$ vs.\ $41.35\%$ MC2 on base; $42.11\%$ vs.\ $41.71\%$ on +open),
-closely matches it across perception, hallucination, and mathematical reasoning
-($35.75\%$ vs.\ $35.87\%$ Core3 on base; $35.90\%$ vs.\ $36.14\%$ on +open), and
-outperforms single-frequency rotation and LoRA built-in encoders while cutting
-FLOPs by $74.2\%$ and latency by $19.5\%$ at high resolution.
+Token-concatenation vision-language models (VLMs) incur high computational
+costs from long visual sequences, while backbone adaptation can degrade
+language capabilities. Existing efforts toward lightweight visual adaptation
+either remove backbone visual tokens through parameter rotation but retain
+external vision towers, or internalize visual encoding but retain deep
+visual sequences and risk text degradation when adapters are merged.
+To combine efficient visual processing with intact text capabilities,
+we present \textbf{Spin Vision-Language Adaptation (\modelname)},
+a dual-tier framework coupling built-in visual encoding with spatially
+aware modulation of frozen language layers, requiring neither an external
+vision tower nor visual tokens in deeper self-attention at inference. Specifically, \textbf{Rotational Visual Encoding (RVE)}
+repurposes shared shallow layers for visual encoding through static
+rotations and channel scaling. Building on these features,
+\textbf{Spatially Aware Visual Modulation (SAVM)} provides global context
+and local evidence through image-conditioned rotations and spatial queries.
+To address the mismatch between teacher-forced training and autoregressive
+inference, \textbf{Vision-Language On-Policy Distillation (VL-OPD)} aligns
+teacher and student distributions along student-generated trajectories.
+Controlled experiments show competitive perception and hallucination
+detection with unchanged text-only behavior and 74.2\% fewer FLOPs
+at high resolution. Across student configurations, VL-OPD improves
+free-form generation accuracy by up to 9.9\% in absolute terms.
 \end{abstract}
