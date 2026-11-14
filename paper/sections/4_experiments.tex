@@ -151,8 +151,9 @@ tower-free model already reaches $42.68\%$ MC2 at $s{=}0$
 ($41.52\%{\pm}1.39\%$ over three seeds), matching $1.7$B perception. Across
 three $1.7$B seeds, VL-OPD lifts \modelname-Free{} from $40.36\%$ to $41.11\%$
 MC2 and $33.24\%$ to $33.79\%$ Core3. Scaling to $8$B yields no further gain
-($39.91\%$--$40.90\%$ MC2), confirming that the frozen-backbone interface, not
-language capacity, is the accuracy bottleneck.
+($39.91\%$--$40.90\%$ MC2), indicating that the fixed-width frozen adapter
+bandwidth ($d_q{=}256$, $K{=}4$)---rather than LLM capacity---sets the ceiling,
+making compact $0.6$B deployment ($0.11{\times}$ FLOPs) particularly effective.
 
 \subsection{Ablations}
 \label{sec:abl}
@@ -321,18 +322,19 @@ VoRA (LoRA $K{=}4$, $S_1$)                       & 1.163/40.3\% & 0.149 & 27.93 
 \paragraph{Format boundary.}
 Retraining on $28$k \emph{+open} ($+6{,}500$ doc/chart pairs and $+2{,}101$
 geometry items, Tab.~\ref{tab:supp_boundary}) doubles \modelname-Tower geometry
-accuracy ($1.83\%{\to}3.83\%$), whereas ChartQA ($10.40\%{\to}10.32\%$) and
-OCRBench ($1.60\%{\to}1.10\%$) stay flat even for full-token LLaVA-Proj.
-Because operator modulation encodes images into rotation parameters rather than
-a per-character KV memory, dense transcription remains outside the zero-token
-regime.
+accuracy ($1.83\%{\to}3.83\%$), whereas anchor-pooled \texttt{hyb} leaves
+ChartQA around $1.2\%$. Replacing $16$-anchor pooling with \texttt{direct\_hyb}
+in our $44$k setup recovers ChartQA to $9.52\%$--$9.88\%$ ($94\%$ of full-token
+LLaVA-Proj's $10.52\%$, vs.\ $0.72\%$ for ROSE), while exact character
+transcription (OCRBench) remains a natural target for hybrid sparse-token
+retention since operator modulation alone omits per-character KV memory.
 
 \paragraph{Debiased $44$k auditing.}
 Tab.~\ref{tab:grounding} evaluates all three tiers under the leakage-free,
 label-balanced $44$k mixture. Three findings emerge:
 (1) Bounding dynamic rotations to the five residual-stream entry projections
 ($\tau_{\mathrm{rot}}{=}0.12$) eliminates unbounded-rotation decoding collapse
-($11.79\%{\to}40.89\%$--$41.67\%$ MC2 and $99.9\%$--$100.0\%$ EOS under
+($11.79\%{\to}40.89\%$--$41.33\%$ MC2 and $99.9\%$--$100.0\%$ EOS under
 \texttt{--force-gen}). Continuing from \texttt{CA-Only} for $800$ steps,
 $3$-seed means improve monotonically from $R_1$ ($19.31\%$ Avg6 / $34.56\%$
 Core3) to $R_2$ ($19.52\%$ / $34.76\%$) and $R_3$ ($19.61\%$ / $34.85\%$),
