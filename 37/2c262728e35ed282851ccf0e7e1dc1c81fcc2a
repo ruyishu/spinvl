@@ -1,0 +1,50 @@
+paper/sections/5_conclusion.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 5-20,23-35
+paper/sections/0_abstract.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 2-24
+paper/sections/2_related.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 4-24,26-50,52-70
+paper/preamble.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 1-59
+paper/sections/3_method.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 4-18,21-37,39,42-44,46-47,49-50,52-55,57-60,62-71,73-77,79-80,82,85-96,98-101,103-110,112-115,118-122,124,127-135,137-139,142-155,158-173,175-177,180-191
+scripts/verify_paper_numbers.py
+  s_2218750ca2fee0::t_68dcf7234e74e0 90-92
+  s_2218750ca2fee0::t_54a23b0e1144b3 132-134
+  s_2218750ca2fee0::t_c7835011ee7103 205-207
+  s_2218750ca2fee0::t_ce20f7ebb2b2b6 286-288
+paper/sections/X_suppl.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 1-297
+paper/sections/1_intro.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 2,5-16,19-30,32-51,53-67,69-72,74-102,104-109,111-114,116-119
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 7-23,26-61,69-74,98,122-142,147-154,162-164,188-191,207,209,215-241,248-250,268-281,287-290,319-354
+paper/cvpr.sty
+  s_2218750ca2fee0::t_4a9f6c49059579 1-506
+verify.md
+  s_2218750ca2fee0::t_8a894c3831356d 11-24,28-63
+  s_2218750ca2fee0::t_7634589a4f52ee 1-2,4-8
+  s_2218750ca2fee0::t_36820e2c9a196c 3,9-10,25-27
+paper/main_cvpr_official.tex
+  s_2218750ca2fee0::t_4a9f6c49059579 1-2,5-8,10-11,13-21,23-24,26-27,29-30,34-43,46-48,50
+paper/ieeenat_fullname.bst
+  s_2218750ca2fee0::t_4a9f6c49059579 1-1448
+paper/references.bib
+  s_2218750ca2fee0::t_4a9f6c49059579 30,69-70,82,89,103,110,131,195-363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "372c262728e35ed282851ccf0e7e1dc1c81fcc2a",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-hydrogen"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
