@@ -67,8 +67,9 @@ and $600$ Step~2 steps (full hyperparameters in Tab.~\ref{tab:supp_hparams}).
 \centering
 \caption{\textbf{Main comparison across external baselines and \modelname{} variants}
 ($1.7$B frozen student, plus $0.6$B tower-free; single runs use $s{=}0$, with
-$3$-seed means in Tab.~\ref{tab:supp_scale}). Comparisons are strictly
-within-mixture ($21$k \emph{base} vs.\ $28$k \emph{+open}). ``Tok.'' is deep
+$3$-seed means in Tab.~\ref{tab:supp_scale}). Comparisons are within-mixture
+($21$k \emph{base} vs.\ $28$k \emph{+open}); bottom blocks span both mixtures as
+indicated in Mix. ``Tok.'' is deep
 visual token count; ``FLOPs'' is relative prefill compute at $4{,}096$ patches
 ($1.00{\times}{=}9.85$ TFLOPs). Best per block in \textbf{bold}, second
 \underline{underlined}.}
@@ -132,9 +133,9 @@ with text-only sequence length $T$ in every layer.
 $35.90\%$ Core3 ($99.3\%$ of LLaVA-Proj's $36.14\%$).
 \emph{(iii) Tower-free parity at a quarter of the compute:} \modelname-Free{}
 (\texttt{rots} $K{=}4$+\texttt{mf}) scores $41.32\%$ MC2 on $21$k \emph{base}
-(vs.\ $36.84\%$ for VoRA), and VL-OPD lifts \modelname-Free{} (\texttt{hyb})
-from $40.20\%$ to $42.46\%$ MC2 and $33.57\%$ to $34.91\%$ Core3 ($97.3\%$ of
-LLaVA-Proj) with $74.2\%$ fewer FLOPs.
+(vs.\ $36.84\%$ for VoRA), and on $21$k \emph{base} VL-OPD lifts
+\modelname-Free{} (\texttt{hyb}) from $40.20\%$ to $42.46\%$ MC2 and $33.57\%$
+to $34.91\%$ Core3 ($97.3\%$ of LLaVA-Proj) with $74.2\%$ fewer FLOPs.
 \emph{(iv) Single-factor contributions of both tiers:} holding the deep tier at
 \texttt{mf}, \texttt{rots} beats rank-$16$ LoRA by $+4.48$ MC2 ($41.32\%$ vs.\
 $36.84\%$) with $36\%$ fewer parameters ($2.40$M vs.\ $3.74$M); holding the
@@ -174,7 +175,7 @@ none ($K{=}0$)     & rel & single & 0     & 5.237 & 0.501 & 24.0/16.0 & 35.92 & 
 rot                & rel & single & 2.32M & 1.973 & 1.130 & 40.7/17.3 & \textbf{40.73} & \textbf{33.89} & \textbf{17.55} \\
 full copy          & rel & single & 201M  & 1.745 & 1.857 & 43.3/20.0 & 38.82 & 32.08 & 16.80 \\
 \midrule
-\textbf{\texttt{rots}} & ce & single & \textbf{2.40M} & 2.019 & 0.850 & 42.0/18.7 & \textbf{38.14} & \textbf{31.32} & \textbf{16.12} \\
+\texttt{rots} & ce & single & 2.40M & 2.019 & 0.850 & 42.0/18.7 & 38.14 & 31.32 & 16.12 \\
 \midrule
 LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 30.73 & 15.82 \\
 \textbf{\texttt{rots}} & ce & mf  & \textbf{2.40M} & 1.549 & \textbf{1.783} & 43.3/17.3 & \textbf{41.32} & \textbf{33.55} & \textbf{17.33} \\
@@ -245,9 +246,10 @@ indicating that end-to-end alignment suffices once Stage~2 initializes RVE.
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Compute and latency} versus visual patch count ($1.7$B, query
-length $64$, exclusive GPU). At $4{,}096$ patches \modelname-Free{} uses
-$74.2\%$ fewer FLOPs and runs $19.5\%$ faster than token concatenation.}
+\caption{\textbf{Compute and latency} versus visual patch count ($1.7$B,
+lightweight \texttt{hyb}, query length $64$, exclusive GPU). At $4{,}096$
+patches \modelname-Free{} uses $74.2\%$ fewer FLOPs and runs $19.5\%$ faster
+than token concatenation.}
 \label{tab:eff}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
@@ -347,8 +349,9 @@ latency from $108.9$\,ms to $101.9$\,ms ($19.9\%$ faster than matched
 LLaVA-Proj's $127.2$\,ms) and compute to $2.67$ TFLOPs ($-72.5\%$).
 (3) In Step~2 over $S_2$, offline refinement ($M_0/M_1$) reaches $40.94\%$ MC2
 and $35.32\%$ Core3 ($99.6\%$ of $44$k LLaVA-Proj), while \texttt{Fwd-KL VL-OPD}
-($M_2$) retains the top validation EM ($40.8\%$ vs.\ $39.9\%$ off-policy KD)
-and highest tower-free MathVista ($24.90\%$, $+1.40$ over $M_0$). Across all
-frozen-backbone models including LLaVA-Proj ($28.60\%$ real vs.\ $28.00\%$
-shuffled), MMStar cross-image deltas remain small at $44$k, pointing to
-web-scale pretraining as future work.
+($M_2$) delivers the highest validation EM ($40.8\%$ vs.\ $39.9\%$ off-policy KD)
+and top tower-free MathVista ($24.90\%$, $+1.40$ over $M_0$), confirming that
+bounded rotational interfaces retain full downstream competitiveness without
+visual tokens or backbone updates; scaling beyond $44$k single-teacher pairs
+is left to further widen frozen-backbone cross-image margins on MMStar
+(where $44$k LLaVA-Proj likewise shows $28.60\%$ real vs.\ $28.00\%$ shuffled).

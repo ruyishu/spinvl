@@ -31,53 +31,66 @@ def save_both(fig, filename):
 
 
 def plot_main_results():
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.6, 4.4), gridspec_kw={"width_ratios": [2.25, 1.0]}, dpi=240)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14.4, 4.5), gridspec_kw={"width_ratios": [2.25, 1.05]}, dpi=240)
 
     metrics = ["MMStar\n(Perception)", "HallusionBench\n(Anti-Hallu.)", "MathVista\n(Visual Math)",
                "MC2 Avg\n(Perc.+Hallu.)", "Core3 Avg\n(3-Bench Mean)"]
     data = {
-        "LLaVA-Proj (Full Tok, 21k)":      [29.60, 53.10, 24.90, 41.35, 35.87],
-        "ROSE (Single-Freq, 21k)":         [25.60, 54.36, 19.70, 39.98, 33.22],
-        "VoRA (LoRA K=4, 21k)":            [23.73, 49.95, 18.50, 36.84, 30.73],
-        "SpinVL-Tower (hyb, 21k, Ours)":   [30.60, 58.15, 18.50, 44.37, 35.75],
+        "LLaVA-Proj (Full Tok, 21k)":        [29.60, 53.10, 24.90, 41.35, 35.87],
+        "ROSE (Single-Freq, 21k)":           [25.60, 54.36, 19.70, 39.98, 33.22],
+        "VoRA (LoRA K=4, 21k)":              [23.73, 49.95, 18.50, 36.84, 30.73],
+        "SpinVL-Tower (hyb, 21k, Ours)":     [30.60, 58.15, 18.50, 44.37, 35.75],
         "SpinVL-Free+OPD (1.7B, 21k, Ours)": [27.93, 56.99, 19.80, 42.46, 34.91],
         "SpinVL-Free+OPD (0.6B, 28k, Ours)": [27.53, 57.83, 18.60, 42.68, 34.66],
     }
     colors = [C_LLAVA, C_ROSE, C_VORA, C_TOWER, C_FREE, C_FREE06]
 
     x = np.arange(len(metrics))
-    w = 0.132
+    w = 0.136
+    # Explicit per-bar (dx, dy) offsets for the 3 "Ours" series so adjacent labels never collide
+    tier_offsets = {
+        3: [(0.0, 0.7), (-0.015, 2.7), (0.0, 0.7), (0.0, 0.7), (-0.015, 2.7)],
+        4: [(0.0, 0.6), (0.0, 0.45),   (0.0, 0.7), (-0.01, 0.55), (0.0, 0.45)],
+        5: [(0.03, 2.5), (0.03, 2.7),  (0.02, 2.5), (0.03, 2.5), (0.03, 2.6)],
+    }
     for idx, (label, vals) in enumerate(data.items()):
         offset = (idx - 2.5) * w
-        bars = ax1.bar(x + offset, vals, width=w * 0.92, label=label, color=colors[idx],
+        bars = ax1.bar(x + offset, vals, width=w * 0.90, label=label, color=colors[idx],
                        edgecolor="#1E293B", linewidth=0.65)
-        if "Ours" in label:
-            for b in bars:
-                ax1.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.65, f"{b.get_height():.1f}",
-                         ha="center", va="bottom", fontsize=7.2, fontweight="bold", color=colors[idx])
+        if idx in tier_offsets:
+            for mi, b in enumerate(bars):
+                dx, dy = tier_offsets[idx][mi]
+                ax1.text(b.get_x() + b.get_width() / 2 + dx, b.get_height() + dy,
+                         f"{b.get_height():.1f}", ha="center", va="bottom",
+                         fontsize=6.9, fontweight="bold", color=colors[idx])
 
     ax1.set_xticks(x)
     ax1.set_xticklabels(metrics, fontsize=9.8, fontweight="bold")
     ax1.set_ylabel("Accuracy (%)", fontsize=10.5, fontweight="bold")
-    ax1.set_ylim(12, 66)
+    ax1.set_ylim(12, 68)
     ax1.grid(axis="y", linestyle="--", alpha=0.35)
     ax1.set_title("(a) Public Multimodal Benchmark Comparison", fontsize=11.5, fontweight="bold", pad=10)
-    ax1.legend(loc="upper right", fontsize=8.4, frameon=True, ncol=2)
+    ax1.legend(loc="upper right", fontsize=8.3, frameon=True, ncol=2)
 
     variants = ["SpinVL\n(Decoupled)", "Merged\nrot_K4", "Merged\nrots_K4", "Merged\nLoRA (VoRA)"]
     gsm = [70.4, 0.0, 0.8, 0.0]
     arc = [71.4, 24.2, 23.4, 27.4]
     x2 = np.arange(len(variants))
-    w2 = 0.35
+    w2 = 0.36
     b1 = ax2.bar(x2 - w2 / 2, gsm, width=w2, label="GSM8K (Math)", color=C_FREE, edgecolor="#1E293B", linewidth=0.7)
     b2 = ax2.bar(x2 + w2 / 2, arc, width=w2, label="ARC-Challenge", color=C_TOWER, edgecolor="#1E293B", linewidth=0.7)
-    for b in list(b1) + list(b2):
-        ax2.text(b.get_x() + b.get_width() / 2, b.get_height() + 1.2, f"{b.get_height():.1f}%",
-                 ha="center", va="bottom", fontsize=7.8, fontweight="bold")
+    for idx_b, b in enumerate(b1):
+        dx = -0.04 if idx_b == 0 else 0.0
+        ax2.text(b.get_x() + b.get_width() / 2 + dx, b.get_height() + 1.3, f"{b.get_height():.1f}%",
+                 ha="center", va="bottom", fontsize=7.5, fontweight="bold")
+    for idx_b, b in enumerate(b2):
+        dx = 0.06 if idx_b == 0 else 0.0
+        ax2.text(b.get_x() + b.get_width() / 2 + dx, b.get_height() + 1.3, f"{b.get_height():.1f}%",
+                 ha="center", va="bottom", fontsize=7.5, fontweight="bold")
     ax2.set_xticks(x2)
     ax2.set_xticklabels(variants, fontsize=9.0, fontweight="bold")
     ax2.set_ylabel("Accuracy (%)", fontsize=10.5, fontweight="bold")
-    ax2.set_ylim(0, 86)
+    ax2.set_ylim(0, 88)
     ax2.grid(axis="y", linestyle="--", alpha=0.35)
     ax2.set_title("(b) Pure-Text Preservation (100% Lossless)", fontsize=11.5, fontweight="bold", pad=10)
     ax2.legend(loc="upper right", fontsize=8.8, frameon=True)
@@ -87,7 +100,7 @@ def plot_main_results():
 
 
 def plot_efficiency():
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.8, 4.1), dpi=240)
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14.0, 4.2), dpi=240)
 
     patches = [256, 576, 1024, 2304, 4096]
     tflops_ours = [0.30, 0.45, 0.67, 1.37, 2.54]
@@ -98,14 +111,16 @@ def plot_efficiency():
     ax1.plot(patches, tflops_rose, "s-.", color=C_TOWER, linewidth=2.1, label="ROSE / SpinVL-Tower (Ext. Tower)")
     ax1.plot(patches, tflops_ours, "D-", color=C_FREE, linewidth=2.6, label="SpinVL-Free (Ours, -74.2% FLOPs)")
     ax1.fill_between(patches, tflops_ours, tflops_llava, color=C_FREE, alpha=0.08)
-    ax1.annotate("-74.2% FLOPs\n(2.54 vs 9.85 TFLOPs)", xy=(4096, 2.54), xytext=(1950, 5.7),
+    ax1.annotate("-74.2% FLOPs\n(2.54 vs. 9.85 TFLOPs)", xy=(4096, 2.54), xytext=(2200, 0.22),
                  arrowprops=dict(arrowstyle="->", color=C_FREE, lw=1.6),
-                 fontsize=8.8, fontweight="bold", color=C_FREE)
+                 fontsize=8.3, fontweight="bold", color=C_FREE,
+                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=C_FREE, alpha=0.95, lw=0.8))
     ax1.set_xlabel("Number of Visual Patches", fontsize=9.8, fontweight="bold")
     ax1.set_ylabel("Forward TFLOPs", fontsize=9.8, fontweight="bold")
+    ax1.set_ylim(-0.2, 10.6)
     ax1.set_title("(a) Compute Scaling vs. Image Resolution", fontsize=10.8, fontweight="bold")
     ax1.grid(True, linestyle="--", alpha=0.35)
-    ax1.legend(fontsize=8.0, loc="upper left")
+    ax1.legend(fontsize=7.9, loc="upper left")
 
     ms_ours = [65.8, 66.6, 69.8, 80.4, 99.4]
     ms_rose = [58.2, 57.8, 63.8, 86.0, 126.1]
@@ -113,9 +128,10 @@ def plot_efficiency():
     ax2.plot(patches, ms_llava, "o--", color=C_LLAVA, linewidth=2.1, label="LLaVA (Full Tokens)")
     ax2.plot(patches, ms_rose, "s-.", color=C_TOWER, linewidth=2.1, label="ROSE (Ext. Tower)")
     ax2.plot(patches, ms_ours, "D-", color=C_FREE, linewidth=2.6, label="SpinVL-Free (Ours)")
-    ax2.annotate("Faster at High-Res\n99.4ms vs 123.4ms", xy=(4096, 99.4), xytext=(1850, 111),
+    ax2.annotate("Faster at High-Res\n99.4ms vs. 123.4ms", xy=(4096, 99.4), xytext=(1750, 109),
                  arrowprops=dict(arrowstyle="->", color=C_FREE, lw=1.6),
-                 fontsize=8.8, fontweight="bold", color=C_FREE)
+                 fontsize=8.3, fontweight="bold", color=C_FREE,
+                 bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=C_FREE, alpha=0.92, lw=0.8))
     ax2.set_xlabel("Number of Visual Patches", fontsize=9.8, fontweight="bold")
     ax2.set_ylabel("Exclusive-GPU Latency (ms)", fontsize=9.8, fontweight="bold")
     ax2.set_title("(b) End-to-End Latency Crossover", fontsize=10.8, fontweight="bold")
@@ -126,20 +142,21 @@ def plot_efficiency():
     ce_acc = [19.7, 21.1, 20.5, 21.6, 22.4]
     rel_acc = [18.6, 18.7, 23.3, 19.4, 19.3]
     ax3.plot(Ns, ce_acc, "o-", color=C_TOWER, linewidth=2.3, label="CE Arm (Scales Best at Large N)")
-    ax3.plot(Ns, rel_acc, "s--", color=C_FREE06, linewidth=2.1, label="KD+Rel Arm (3.5x Eff. @ N=6k)")
+    ax3.plot(Ns, rel_acc, "s--", color=C_FREE06, linewidth=2.1, label="KD+Rel Arm (Peaks @ N=6k)")
     ax3.axhline(22.4, color=C_LLAVA, linestyle=":", linewidth=1.3, label="CE @ N=21k Target (22.4%)")
     ax3.set_xlabel("Training Samples N (in thousands)", fontsize=9.8, fontweight="bold")
     ax3.set_ylabel("Val Full-Answer Accuracy (%)", fontsize=9.8, fontweight="bold")
+    ax3.set_ylim(18.0, 24.3)
     ax3.set_title("(c) Data Scaling & Sample Efficiency", fontsize=10.8, fontweight="bold")
     ax3.grid(True, linestyle="--", alpha=0.35)
-    ax3.legend(fontsize=8.0, loc="lower right")
+    ax3.legend(fontsize=7.9, loc="upper right")
 
     plt.tight_layout()
     save_both(fig, "fig_efficiency.png")
 
 
 def plot_ablations():
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.8, 4.1), dpi=240)
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14.0, 4.2), dpi=240)
 
     # Panel A: Controlled Frontend Mode Ablation grouped by arm (rel vs ce, 21k s=0)
     modes = ["none\n(K=0)", "full\n(Copy)", "rot\n(SO(64))", "LoRA+mf\n(VoRA)", "rots\n(single)", "rots+mf\n(Ours)"]
@@ -170,16 +187,20 @@ def plot_ablations():
     x2 = np.arange(len(Ks))
     ax2_r = ax2.twinx()
     bars_k = ax2.bar(x2 - 0.14, tf_first, width=0.36, color=C_TOWER, alpha=0.88, label="Val 1st-Token Acc (%)", edgecolor="#1E293B")
-    line_k = ax2_r.plot(x2 + 0.14, gap, "D-", color=C_FREE, linewidth=2.4, markersize=7.0, label="Grounding Gap (CE)")
+    ax2_r.plot(x2 + 0.14, gap, "D-", color=C_FREE, linewidth=2.4, markersize=7.0, label="Grounding Gap (CE)")
     for b in bars_k:
         ax2.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.55, f"{b.get_height():.1f}%",
                  ha="center", va="bottom", fontsize=7.6, fontweight="bold", color=C_TOWER)
-    for xi, gi in zip(x2 + 0.14, gap):
-        ax2_r.text(xi + 0.06, gi - 0.08, f"+{gi:.2f}", ha="left", va="top", fontsize=7.8, fontweight="bold", color=C_FREE)
+    for idx_k, (xi, gi) in enumerate(zip(x2 + 0.14, gap)):
+        if idx_k == len(gap) - 1:
+            ax2_r.text(xi - 0.04, gi - 0.065, f"+{gi:.2f}", ha="center", va="top", fontsize=7.6, fontweight="bold",
+                       color=C_FREE, bbox=dict(boxstyle="round,pad=0.14", fc="white", ec="none", alpha=0.85))
+        else:
+            ax2_r.text(xi + 0.05, gi - 0.07, f"+{gi:.2f}", ha="left", va="top", fontsize=7.8, fontweight="bold", color=C_FREE)
     ax2.set_xticks(x2)
     ax2.set_xticklabels(Ks, fontsize=9.2, fontweight="bold")
-    ax2.set_ylim(20, 45.0)
-    ax2_r.set_ylim(0.1, 1.32)
+    ax2.set_ylim(20, 45.5)
+    ax2_r.set_ylim(0.1, 1.38)
     ax2.set_ylabel("1st-Token Accuracy (%)", fontsize=9.8, fontweight="bold", color=C_TOWER)
     ax2_r.set_ylabel("Visual Grounding Gap (CE)", fontsize=9.2, fontweight="bold", color=C_FREE)
     ax2.set_title("(b) Built-in Encoder Depth K Ablation", fontsize=10.8, fontweight="bold")
@@ -188,11 +209,11 @@ def plot_ablations():
     h2, l2 = ax2_r.get_legend_handles_labels()
     ax2.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=7.8, frameon=True)
 
-    # Panel C: Step 2 VL-OPD Free-Generation Gain
+    # Panel C: Step 2 VL-OPD Free-Generation Gain (verified directly against Tab. 3)
     tasks = ["MMStar\n(0.6B)", "Hallusion\n(0.6B)", "MathVista\n(0.6B)",
-             "MMStar\n(1.7B)", "Val EM\n(1.7B v5)"]
-    before = [14.53, 23.55, 9.70, 14.07, 18.00]
-    after = [22.20, 33.44, 14.40, 18.13, 23.00]
+             "MC2\n(0.6B)", "MMStar\n(1.7B)"]
+    before = [14.53, 23.55, 9.70, 19.04, 14.07]
+    after = [22.20, 33.44, 14.40, 27.82, 18.13]
     x3 = np.arange(len(tasks))
     b_pre = ax3.bar(x3 - w / 2, before, width=w, label="Before VL-OPD (Offline CE)", color=C_VORA, edgecolor="#1E293B")
     b_post = ax3.bar(x3 + w / 2, after, width=w, label="After VL-OPD (On-Policy KL)", color=C_FREE, edgecolor="#1E293B")
@@ -202,7 +223,7 @@ def plot_ablations():
                  ha="center", va="bottom", fontsize=7.8, fontweight="bold", color=C_FREE)
     ax3.set_xticks(x3)
     ax3.set_xticklabels(tasks, fontsize=8.0, fontweight="bold")
-    ax3.set_ylim(0, 43.5)
+    ax3.set_ylim(0, 44.0)
     ax3.set_ylabel("Free-Generation Accuracy (%)", fontsize=9.8, fontweight="bold")
     ax3.set_title("(c) Step 2 VL-OPD Cures Exposure Bias", fontsize=10.8, fontweight="bold")
     ax3.grid(axis="y", linestyle="--", alpha=0.35)
@@ -210,6 +231,9 @@ def plot_ablations():
 
     plt.tight_layout()
     save_both(fig, "fig_ablations.png")
+    # Keep fig_abl_v2.png synced for Overleaf / LaTeX
+    import shutil
+    shutil.copyfile(os.path.join(PAPER_FIG_DIR, "fig_ablations.png"), os.path.join(PAPER_FIG_DIR, "fig_abl_v2.png"))
 
 
 if __name__ == "__main__":

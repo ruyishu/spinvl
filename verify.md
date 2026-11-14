@@ -33,8 +33,8 @@
 - [x] **`2_related.tex`**：核对 `VoRA`、`VLoRA`、`LLaVA-KD`、`MoVE-KD`、`ROSE`、`EVE` 原始文献无误，保持不动。
 
 ### `sec/3_method.tex`
-- [x] **补齐李代数切空间有界旋转 & 仅旋 5 投影**：明确给出 $\tau_{\mathrm{rot}}=0.12$ 的 $\tanh$ 切空间缩放公式，说明跳过 `o`/`down`（仅旋 `{q,k,v,gate,up}`），修正门控偏置初始化为 `0`（无界）与 `-2.0`（$\tau_{\mathrm{rot}}>0$，$g\approx 0.24$）。
-- [x] **补齐 `qcond` 与 `direct_hyb` 机制**：在 SAVM 补入提示条件化 `qcond` 与 `direct_hyb` / `hyb` 兼容说明。
+- [x] **补齐李代数切空间有界旋转 & 仅旋 5 投影**：明确给出 $\tau_{\mathrm{rot}}=0.12$ 的 $\tanh$ 切空间缩放公式（`Eq. (6)` 两行对齐防越界），说明跳过 `o`/`down`（仅旋 `{q,k,v,gate,up}`），修正门控公式与偏置初始化为：无界 $2\sigma(\cdot)$ 偏置 `0`（$g=1$）、有界 $\sigma(\cdot)$ 偏置 `-2.0`（$g\approx 0.12$，严格对齐 `src/vrmg.py`）。
+- [x] **补齐 `qcond` 与 `direct_hyb` 机制**：在 SAVM 补入提示条件化 `qcond`（按 *image--question prefill* 缓存复用）与 `direct_hyb` / `hyb` 兼容说明。
 - [x] **补齐 `Modality Decoupling` 与 `Complexity`**：给出 `logits_diff = 0` 与 $O(KN^2+LT^2)$ vs. $O(L(T+N)^2)$，整章精简压至 `~2.3` 页。
 
 ### `sec/4_experiments.tex`
@@ -55,9 +55,9 @@
 - [x] **专有名词大括号保护与作者重音修复**：已保护 `{LoRA}`、`{OCR}`、`{Inter-GPS}`、`{ChartQA}`、`{DocVQA}`、`{VQA}`、`Try {ARC}, the {AI2}`，并修复 Flamingo 作者 `{Bi{\'n}kowski}` 与 `Karen Simonyan`。
 
 ### `sec/X_suppl.tex` & `main.tex`
-- [x] **重构 `X_suppl.tex`（S1–S4）**：包含 S1 架构复杂度与无损旁路细节、S2 数据去漏审计与超参表（`Tab. S1`）、S3 迁出的 `Tab. S2–S4` / `Fig. S1–S3` / `44k` 多 seed 汇总（`Tab. S5`） / `--force-gen` 全量表（`Tab. S6`）、以及 S4 细分能力与 OCR 错误边界诊断表（`Tab. S7`）。
-- [x] **编译与校验**：Overleaf 编译 0 错误、0 警告、全篇 0 处 `??`；`python scripts/verify_paper_numbers.py` 545 项校验通过，`X_suppl.tex` 新表校验通过。
+- [x] **重构 `X_suppl.tex`（S1–S4）与附图重绘**：包含 S1 架构复杂度与无损旁路细节、S2 数据去漏审计与超参精确对照表（`Tab. S1`，区分 `44k` 与 `21k/28k` 损失项）、S3 重绘并去重遮挡/去除 `v5` 内部标签的 `Fig. S1–S3`、迁出的 `Tab. S2–S4`（修正 `Tab. S4` `5.49` 加粗）、`44k` 多 seed 汇总 `Tab. S5`（含 `R0` vs `R1–R3` / `S2` vs `F2` 积极定位说明）与 `--force-gen` 全量表（`Tab. S6`），以及 S4 细分能力与 OCR 错误边界诊断表（`Tab. S7`）。
+- [x] **编译与校验**：Overleaf 编译 0 错误、0 警告、全篇 0 处 `??`，第 4 页 `Eq. (6)` 与第 8 页收尾排版已逐页渲染核验；`python scripts/verify_paper_numbers.py` 545 项校验通过，`Tab. S5–S6` 150 项校验通过。
 
 ### 待人工确认小项（非阻塞）
-- [ ] 检查 `figures/spinvl_method.pdf` 与 `figures/fig_abl_v2.png` 图片内文字标注是否需要随 `direct_hyb` / 符号做微调。
+- [ ] 请合作者按对话提供的精简修改清单更新 `figures/spinvl_method.pdf`（补充 `qcond`、`direct_hyb`、$\tau_{\mathrm{rot}}\tanh$ 与门控符号 $\tilde{x}$）。
 - [ ] 投稿前拆出 Pages 1–10 为 `main.pdf`，Pages 11–13 为 `supp.pdf`。

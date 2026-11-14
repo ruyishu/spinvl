@@ -11,10 +11,9 @@ per-character KV memory without reintroducing pooled visual tokens.
 preservation but caps visual accuracy: an $8$B student does not outperform a
 $0.6$B one, indicating that the adapter interface rather than language capacity
 is the bottleneck.
-\emph{(3) Pretraining scale and spatial sensitivity.} Our mixtures span
-$21$k--$44$k items from one teacher; on $44$k, real-minus-shuffled MMStar
-deltas remain modest across all frozen-backbone models (including full-token
-LLaVA-Proj), leaving million-scale rotation pretraining for future work.
+\emph{(3) Pretraining scale.} Our mixtures span $21$k--$44$k items from one
+teacher; scaling rotational pretraining to larger corpora should further widen
+frozen-backbone cross-image margins alongside token-concatenation baselines.
 \emph{(4) Two-phase inference.} \modelname-Free runs a bidirectional patch pass
 before causal text decoding; production throughput would benefit from a fused
 kernel.

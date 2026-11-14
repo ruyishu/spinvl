@@ -109,25 +109,28 @@ Lie-algebra tangent bounding in our $44$k audited runs and modulate only the fiv
 residual-stream entry projections $p\in\{\mathrm{q,k,v,gate,up}\}$ (skipping
 $\mathrm{o}$ and $\mathrm{down}$):
 \begin{equation}
-A_{\ell,p,r}=\frac{\tau_{\mathrm{rot}}}{\sqrt{b}}
-\bigl(\mathcal{T}(\tanh a_{\ell,p,r})-\mathcal{T}(\tanh a_{\ell,p,r})^\top\bigr),
-\;\;
-R_{\ell,p,r}=\operatorname{Cayley}(A_{\ell,p,r}),
+\begin{aligned}
+A_{\ell,p,r} &= \frac{\tau_{\mathrm{rot}}}{\sqrt{b}}
+\bigl(\mathcal{T}(\tanh a_{\ell,p,r})-\mathcal{T}(\tanh a_{\ell,p,r})^\top\bigr), \\
+R_{\ell,p,r} &= \operatorname{Cayley}(A_{\ell,p,r}),
+\end{aligned}
 \label{eq:cayley}
 \end{equation}
 where $\mathcal{T}$ fills the strictly lower triangle and $\tau_{\mathrm{rot}}{=}0.12$
 (unbounded $a_{\ell,p,r}$ across all seven projections in $21$k/$28$k reference
 runs). For projections of input width $d$, a token-wise gate
-$g_{\ell,p}(x)=2\sigma(\operatorname{Linear}_{\mathrm{gate},\ell}(x))_{\mathcal{I}_p}$
-modulates each block as
+$g_{\ell,p}(x)=\sigma(\operatorname{Linear}_{\mathrm{gate},\ell}(x))_{\mathcal{I}_p}$
+for $\tau_{\mathrm{rot}}{>}0$ (or $2\sigma(\cdot)$ when unbounded) modulates each
+block as
 \begin{equation}
 \widetilde{x}_r=x_r+g_{\ell,p,r}(x)\bigl(x_rR_{\ell,p,r}-x_r\bigr).
 \label{eq:gate}
 \end{equation}
 Zero-initializing $\operatorname{Linear}_{\mathrm{rot},\ell}$ yields $R{=}I$,
-while the gate bias is initialized to $0$ ($g{=}1$) in unbounded runs and
-$-2.0$ ($g{\approx}0.24$) when $\tau_{\mathrm{rot}}{>}0$. The image-conditioned
-rotations are computed once per image and reused across all decoding steps.
+while the gate bias is initialized to $-2.0$ ($g{\approx}0.12$) when
+$\tau_{\mathrm{rot}}{>}0$ and $0$ ($g{=}1$) in unbounded runs. The conditioned
+rotations are computed once per image--question prefill and reused across all
+decoding steps.
 
 \paragraph{Spatial retrieval hybrid.}
 To supplement parameter rotation with explicit location-specific evidence, SAVM
