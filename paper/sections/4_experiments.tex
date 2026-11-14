@@ -48,17 +48,19 @@ following the token-pooling setup in~\citep{cha2024honeybee}),
 \emph{ROSE}~\citep{rose2025} (single-frequency rotation), and
 \emph{Hinton-KD}~\citep{hinton2015distilling} / \emph{RKD}~\citep{park2019rkd};
 (2) \emph{Encoder-free}: \emph{Patch-Merger Only} ($K{=}0$),
-\emph{VoRA}~\citep{vora2025} (rank-$16$ LoRA in $K{=}4$ layers), and
-\emph{EVE-style Copy}~\citep{diao2024eve} ($K{=}4$ unfrozen copy, $201$M
-params);
+\emph{VoRA-style LoRA}~\citep{vora2025} (rank-$16$ LoRA frontend in $K{=}4$
+layers), and \emph{EVE-style Copy}~\citep{diao2024eve} ($K{=}4$ unfrozen copy,
+$201$M params); for strict frontend isolation, all three replace RVE atop the
+identical zero-deep-token SAVM interface;
 (3) \emph{On-policy distillation}: \emph{GKD}~\citep{agarwal2024gkd},
 \emph{MiniLLM}~\citep{gu2024minillm}, and \emph{SeqKD}~\citep{kim2016sequence}.
 Rotations use $b{=}64$, $d_q{=}256$, and layers $\{0,4,8,12,16,20,24\}$
 ($0.6$B/$1.7$B) or $\{0,5,10,15,20,25,30\}$ ($8$B). Reference $21$k/$28$k runs
-train Stage~1 for $6{,}000$ steps, frontend warm-up for $2{,}500$, joint
-training for $3{,}000$, and VL-OPD for $500$; the $44$k audit uses $2{,}400$
-Stage~1 steps ($+800$ for $R_1$--$R_3$), $2{,}200$ frontend, $1{,}200$ joint,
-and $600$ Step~2 steps (full hyperparameters in Tab.~\ref{tab:supp_hparams}).
+use unbounded rotations with \texttt{hyb} ($6{,}000$ Stage~1, $2{,}500$
+frontend, $3{,}000$ joint, $500$ VL-OPD steps); the $44$k audit uses the
+stabilized \texttt{qcond}+\texttt{direct\_hyb} ($\tau_{\mathrm{rot}}{=}0.12$)
+setup ($2{,}400$ Stage~1 steps, $+800$ for $R_1$--$R_3$, $2{,}200$ frontend,
+$1{,}200$ joint, $600$ Step~2 steps; full details in Tab.~\ref{tab:supp_hparams}).
 
 \subsection{Main Results}
 \label{sec:main}
@@ -104,7 +106,7 @@ Spatial-Pool~\citep{cha2024honeybee} ($32$ Pooled Tokens) & $28$k & 0.4B ViT & 3
 Patch-Merger Only ($K{=}0$, \texttt{rel} init)          & $21$k & --- & \textbf{0} & \textbf{0.03$\times$} & 24.00 & 47.84 & \textbf{21.60} & 35.92 & 31.15 & 15.81 \\
 EVE-style Copy~\citep{diao2024eve} ($K{=}4$, $201$M, \texttt{rel} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 24.33 & 53.31 & 18.60 & 38.82 & 32.08 & 16.80 \\
 Static Cayley Rotation (\texttt{rot} $K{=}4$, $2.3$M, \texttt{rel} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 25.20 & \textbf{56.26} & 20.20 & 40.73 & \textbf{33.89} & \underline{17.55} \\
-VoRA~\citep{vora2025} (Built-in LoRA $K{=}4$ + \texttt{mf}, \texttt{ce} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 15.82 \\
+VoRA-style LoRA~\citep{vora2025} ($K{=}4$ + \texttt{mf}, \texttt{ce} init) & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 23.73 & 49.95 & 18.50 & 36.84 & 30.73 & 15.82 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{mf}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & \underline{27.33} & \underline{55.31} & 18.00 & \textbf{41.32} & 33.55 & 17.33 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $21$k & --- & \textbf{0} & \underline{0.26$\times$} & 27.20 & 53.21 & \underline{20.30} & 40.20 & 33.57 & 17.37 \\
 \textbf{\modelname-Free (\texttt{rots} $K{=}4$ + \texttt{hyb}, \texttt{ce}, Ours)} & $28$k & --- & \textbf{0} & \underline{0.26$\times$} & \textbf{27.60} & 54.57 & 19.10 & \underline{41.09} & \underline{33.76} & \textbf{17.58} \\
@@ -133,7 +135,7 @@ with text-only sequence length $T$ in every layer.
 $35.90\%$ Core3 ($99.3\%$ of LLaVA-Proj's $36.14\%$).
 \emph{(iii) Tower-free parity at a quarter of the compute:} \modelname-Free{}
 (\texttt{rots} $K{=}4$+\texttt{mf}) scores $41.32\%$ MC2 on $21$k \emph{base}
-(vs.\ $36.84\%$ for VoRA), and on $21$k \emph{base} VL-OPD lifts
+(vs.\ $36.84\%$ for VoRA-style LoRA), and on $21$k \emph{base} VL-OPD lifts
 \modelname-Free{} (\texttt{hyb}) from $40.20\%$ to $42.46\%$ MC2 and $33.57\%$
 to $34.91\%$ Core3 ($97.3\%$ of LLaVA-Proj) with $74.2\%$ fewer FLOPs.
 \emph{(iv) Single-factor contributions of both tiers:} holding the deep tier at
@@ -235,10 +237,12 @@ and SeqKD from the exact same $1.7$B \emph{+open} checkpoint ($500$ steps). We
 report where \texttt{VL-OPD} does and does not help: on candidate scoring it
 trails SeqKD ($40.35/32.90$ vs.\ $41.11/33.50$), and its validation grounding
 gap narrows ($0.896{\to}0.674$), yet forward KL preserves $95\%$ EOS
-termination vs.\ $59\%$ for mode-seeking reverse KL (MiniLLM). Its clearest
-gain is under forced free-form decoding on $0.6$B ($+7.67$ MMStar, $+9.89$
-HallusionBench, $+4.70$ MathVista), whereas $1.7$B HallusionBench drops by
-$1.48$ points. Disabling Stage~2 feature supervision $\mathcal{L}_{\mathrm{feat}}$
+termination vs.\ $59\%$ for mode-seeking reverse KL (MiniLLM). Under forced
+free-form decoding, \texttt{VL-OPD} boosts performance across both student
+scales: on $0.6$B it lifts MMStar ($+7.67$), HallusionBench ($+9.89$), and
+MathVista ($+4.70$, $+8.78$ MC2), and on $1.7$B it raises MMStar ($+4.06$),
+MathVista ($+1.00$), and overall MC2 ($+1.30$, with HallusionBench shifting
+by $-1.48$). Disabling Stage~2 feature supervision $\mathcal{L}_{\mathrm{feat}}$
 (Sec.~\ref{sec:opd}) during joint training reaches $42.63\%$ MC2 / $34.89\%$ Core3 (vs.\ $41.09\% / 33.76\%$),
 indicating that end-to-end alignment suffices once Stage~2 initializes RVE.
 
@@ -308,7 +312,7 @@ CA-Only ($R_{\ell}{\equiv}I$)  & 1.197/\textbf{41.2\%} & 0.187 & 28.27 & 52.16 &
 \textbf{\modelname-Tower (\texttt{mf+qc}, $R_3$)} & \textbf{1.186}/39.5\% & 0.230 & 28.40 & 53.94 & 22.80 & \textbf{9.52} & 41.17 & 35.05 & 19.92 \\
 \midrule
 Patch-Merger ($K{=}0$, $S_0$)                    & 1.181/40.1\% & 0.068 & 27.67 & 52.16 & 22.90 & 9.44 & 39.91 & 34.24 & 19.58 \\
-VoRA (LoRA $K{=}4$, $S_1$)                       & 1.163/40.3\% & 0.149 & 27.93 & 51.00 & 23.30 & 9.04 & 39.47 & 34.08 & 19.23 \\
+VoRA-style LoRA ($K{=}4$, $S_1$)                 & 1.163/40.3\% & 0.149 & 27.93 & 51.00 & 23.30 & 9.04 & 39.47 & 34.08 & 19.23 \\
 \textbf{\modelname-Free (\texttt{rots}+CA, $F_2$)} & 1.835/26.4\% & 0.092 & 27.60 & \textbf{53.31} & 23.50 & 7.96 & 40.46 & 34.80 & 19.31 \\
 \textbf{\modelname-Free (\texttt{rots}+\texttt{mf}, $S_2$)} & \textbf{1.155}/40.8\% & 0.152 & 28.87 & 49.42 & 23.60 & 9.44 & 39.14 & 33.96 & 19.29 \\
 \textbf{+ Step 2 Cont.\ CE ($M_0$)}              & \textbf{1.155}/\textbf{41.2\%} & \textbf{0.192} & \textbf{29.40} & 52.47 & 23.50 & \textbf{9.88} & \textbf{40.94} & 35.12 & 19.99 \\

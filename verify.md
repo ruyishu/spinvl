@@ -34,14 +34,15 @@
 
 ### `sec/3_method.tex`
 - [x] **补齐李代数切空间有界旋转 & 仅旋 5 投影**：明确给出 $\tau_{\mathrm{rot}}=0.12$ 的 $\tanh$ 切空间缩放公式（`Eq. (6)` 两行对齐防越界），说明跳过 `o`/`down`（仅旋 `{q,k,v,gate,up}`），修正门控公式与偏置初始化为：无界 $2\sigma(\cdot)$ 偏置 `0`（$g=1$）、有界 $\sigma(\cdot)$ 偏置 `-2.0`（$g\approx 0.12$，严格对齐 `src/vrmg.py`）。
-- [x] **补齐 `qcond` 与 `direct_hyb` 机制**：在 SAVM 补入提示条件化 `qcond`（按 *image--question prefill* 缓存复用）与 `direct_hyb` / `hyb` 兼容说明。
+- [x] **补齐 `qcond` 与 `direct_hyb` 机制**：在 SAVM 补入提示条件化 `qcond`（按 *image--question prefill* 缓存复用）与 `direct_hyb` / `hyb` 兼容说明，并将 `3.3` 中的配置区分统一改为结构术语（不提前引用第 4 章的 `21k/28k/44k` 数据量代号）。
 - [x] **补齐 `Modality Decoupling` 与 `Complexity`**：给出 `logits_diff = 0` 与 $O(KN^2+LT^2)$ vs. $O(L(T+N)^2)$，整章精简压至 `~2.3` 页。
 
 ### `sec/4_experiments.tex`
 - [x] **修正 `4.2 (iii)` `40.21%` $\to$ `40.20%`**（与 `Tab. 1` 和 `Tab. 3` 完全对齐）。
 - [x] **修正 `4.1` `Qwen3-VL-8B-Instruct` 错引 `[37]` $\to$ `[4]`（`bai2025qwen3vl`）**。
 - [x] **微调 `Token-Pool` 命名 $\to$ `Spatial-Pool`**，正文注明为受~\citep{cha2024honeybee} 启发的 32-token 空间平均池化基线。
-- [x] **澄清 `4.1` 评测协议 & 补充 `44k` 步数**：说明选择题使用候选串似然打分、开放题使用无首词禁词的统一贪心解码、并附 `--force-gen` 审计表；补充 `44k` 训练步数。
+- [x] **澄清 `4.1` 评测协议、基线隔离与补充 `44k` 步数**：说明选择题使用候选串似然打分、开放题使用无首词禁词的统一贪心解码、并附 `--force-gen` 审计表；在 `4.1 / Tab. 1 / Tab. 5` 将 `VoRA` 澄清为受控前端对照 `VoRA-style LoRA`（与 `EVE-style Copy` 同置于零深层视觉 token SAVM 接口之上），消除与 `Fig. 1(b)` 的口径冲突；补充 `44k` 训练步数。
+- [x] **修正 `4.4` `VL-OPD` 自由生成表述**：补全 `1.7B` 在 `MMStar (+4.06)`、`MathVista (+1.00)` 和 `MC2 (+1.30)` 的全部正收益，平衡展示 `HallusionBench (-1.48)`。
 - [x] **修正 `4.5` 符号与消融限定**：`W\mathrm{diag}(d)R_{\mathrm{s}}^{\top}` $\to$ `W\mathrm{diag}(s)R_{\mathrm{s}}^{\top}`，注明 `GSM8K=0.0%/0.8%` 为无纯文本回放受控消融下永久合并前 $K$ 层的结果。
 - [x] **修正 `4.6` `R3` 3-seed 均值对比、`M0/M1/M2` 分工、`--force-gen` 区间端点（`40.89%--41.33%` 严格对齐 `Tab. S6`）、`direct_hyb` 图表能力桥接及 `19.9%` 效率句**；并在 `4.3` 点明冻结接口带宽使 `0.6B`（`0.11x` FLOPs）成为高性价比部署点。
 - [x] **AC 瘦身迁出**：原 `Tab. 2`、`Tab. 4`、`Tab. 7` 与 `Fig. 3–5` 已迁至 `X_suppl.tex`（`Tab. S2–S4`，`Fig. S1–S3`），正文精简至 `~3.0` 页。

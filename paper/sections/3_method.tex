@@ -104,8 +104,8 @@ with $\tau_{\mathrm{high}}<\tau_{\mathrm{mid}}$ focusing high-frequency blocks
 on fine local regions. Each row $c_{\ell,p,r}$ of the concatenated context
 $C_\ell$ predicts raw skew coefficients
 $a_{\ell,p,r}=\operatorname{Linear}_{\mathrm{rot},\ell}(c_{\ell,p,r})$. To
-prevent excessive coordinate drift during autoregressive decoding, we apply
-Lie-algebra tangent bounding in our $44$k audited runs and modulate only the five
+prevent excessive coordinate drift during autoregressive decoding, our stabilized
+variant applies Lie-algebra tangent bounding and modulates only the five
 residual-stream entry projections $p\in\{\mathrm{q,k,v,gate,up}\}$ (skipping
 $\mathrm{o}$ and $\mathrm{down}$):
 \begin{equation}
@@ -117,8 +117,9 @@ R_{\ell,p,r} &= \operatorname{Cayley}(A_{\ell,p,r}),
 \label{eq:cayley}
 \end{equation}
 where $\mathcal{T}$ fills the strictly lower triangle and $\tau_{\mathrm{rot}}{=}0.12$
-(unbounded $a_{\ell,p,r}$ across all seven projections in $21$k/$28$k reference
-runs). For projections of input width $d$, a token-wise gate
+(unbounded $a_{\ell,p,r}$ across all seven projections in the lightweight
+reference configuration; see Sec.~\ref{sec:setup}). For projections of input
+width $d$, a token-wise gate
 $g_{\ell,p}(x)=\sigma(\operatorname{Linear}_{\mathrm{gate},\ell}(x))_{\mathcal{I}_p}$
 for $\tau_{\mathrm{rot}}{>}0$ (or $2\sigma(\cdot)$ when unbounded) modulates each
 block as
@@ -148,12 +149,11 @@ y_{\ell,p}=\bigl(\widetilde{x}+\Delta_\ell(x)\bigr)W_{\ell,p}^\top+\beta_{\ell,p
 \end{equation}
 where $q_\ell^a(x)=\operatorname{Linear}_{q,\ell}(\operatorname{LN}(x))$ and
 $\operatorname{Linear}_{\mathrm{out},\ell}$ is zero-initialized. In the
-$21$k/$28$k lightweight configuration (\texttt{hyb}), $(K_\ell^a,U_\ell^a)$ are
-$M$ learnable spatial anchors pooled from $V$; in the $44$k audited
-configuration (\texttt{direct\_hyb}), text states query all positional visual
-cells directly in the narrow $d_q$ subspace without anchor compression,
-retaining full spatial granularity while keeping deeper self-attention free of
-visual tokens.
+anchor-pooled variant (\texttt{hyb}), $(K_\ell^a,U_\ell^a)$ are $M$ learnable
+spatial anchors pooled from $V$; in the direct variant (\texttt{direct\_hyb}),
+text states query all positional visual cells directly in the narrow $d_q$
+subspace without anchor compression, retaining full spatial granularity while
+keeping deeper self-attention free of visual tokens (Sec.~\ref{sec:setup}).
 
 \subsection{Training Strategy and Properties}
 \label{sec:opd}
