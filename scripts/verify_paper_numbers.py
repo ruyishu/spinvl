@@ -96,7 +96,6 @@ def main():
     t1_rows = extract_table_block(tex_text, "tab:main")[1:]
     t1_files = [
         ("Teacher", BENCH / "teacher_qwen3vl8b.json"),
-        ("Blank Control", V5 / "eval" / "v5_tower_spinvl_full_blank.json"),
         ("LLaVA-Proj 21k", BENCH / "q17_proj_n21000.json"),
         ("ROSE 21k", BENCH / "q17_rose_single_ce.json"),
         ("Hinton-KD 21k", BENCH / "q17_rose_hinton_kd.json"),
@@ -113,11 +112,7 @@ def main():
         ("rot K=4 rel 21k", BENCH / "q17_abl_front_rot_K4.json"),
         ("VoRA LoRA+mf 21k", BENCH / "q17_vora_lora_mf.json"),
         ("SpinVL-Free rots+mf 21k", BENCH / "q17_free_mf_ce.json"),
-        ("SpinVL-Free rots+hyb 21k", BENCH / "q17_free_hybrid_ce.json"),
         ("SpinVL-Free rots+hyb 28k", BENCH / "q17_p15_free_hybrid_ce.json"),
-        ("Free+GKD 28k", BENCH / "q17_p19_free_hybrid_gkd.json"),
-        ("Free+MiniLLM 28k", BENCH / "q17_p19_free_hybrid_revkl.json"),
-        ("Free+SeqKD 28k", BENCH / "q17_p19_free_hybrid_seqkd.json"),
         ("Free+VL-OPD 1.7B 28k s0", BENCH / "q17_p15_free_hybrid_opd.json"),
         ("Free+VL-OPD 1.7B 21k s0", BENCH / "q17_free_hybrid_opd.json"),
         ("Free+VL-OPD 0.6B 28k s0", BENCH / "q06_p15_free_hybrid_opd.json"),
@@ -177,8 +172,9 @@ def main():
                 assert_rounded(f"Tab2:{name}", f"{k}_sample_std_ddof1", std_s, str(s_tex), decimals=2)
                 checks += 2
 
-    # 3. Table 3 (tab:front)
-    t3_rows = extract_table_block(tex_text, "tab:front")[1:]
+    # 3. Table 3 (tab:front or tab:supp_front)
+    t3_label = "tab:supp_front" if "\\label{tab:supp_front}" in tex_text else "tab:front"
+    t3_rows = extract_table_block(tex_text, t3_label)[1:]
     t3_files = [
         ("none K=0", TLOG / "p4_none_K0_joint.json", BENCH / "q17_abl_front_none_K0.json"),
         ("rot K=4", TLOG / "p4_rot_K4_joint.json", BENCH / "q17_abl_front_rot_K4.json"),
@@ -267,8 +263,9 @@ def main():
         assert_rounded(f"Tab5Fgen:{name}", "mc2", bs["mc2"], cells[5], decimals=2)
         checks += 4
 
-    # 6. Table 6 (tab:eff)
-    t_eff_rows = extract_table_block(tex_text, "tab:eff")[2:]  # skip 2-line header
+    # 6. Table 6 (tab:eff or tab:supp_eff)
+    t_eff_label = "tab:supp_eff" if "\\label{tab:supp_eff}" in tex_text else "tab:eff"
+    t_eff_rows = extract_table_block(tex_text, t_eff_label)[2:]  # skip 2-line header
     eff_json = json.loads(PRES.read_text(encoding="utf-8"))["efficiency_K4"]["rows"]
     assert len(t_eff_rows) == len(eff_json)
     for cells, erow in zip(t_eff_rows, eff_json):

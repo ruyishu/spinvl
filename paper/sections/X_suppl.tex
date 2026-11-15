@@ -12,18 +12,45 @@
 \section{Architectural Details and Complexity}
 \label{sec:supp_arch}
 
-\paragraph{Pre-fill FLOPs and KV-cache scaling.}
+\paragraph{Pre-fill FLOPs, two-phase inference, and KV-cache scaling.}
 Let a frozen LLM have $L$ layers, hidden width $d$, intermediate FFN width
 $d_{\mathrm{ff}}$, query/KV projections of widths $(d, 2d_{\mathrm{kv}})$, $N$
-visual patches, and $T$ text tokens. Full token concatenation (\emph{LLaVA-Proj})
-appends all $N_v$ projected visual tokens (or $N_c$ merged tokens) to the text
-sequence across all $L$ layers, incurring $O\bigl(L(T{+}N_c)^2 d\bigr)$
-self-attention compute and $O(L N_c d_{\mathrm{kv}})$ visual KV-cache
-overhead during autoregressive decoding. By contrast, \modelname-Free confines
-bidirectional patch attention over $N$ patches to the first $K{\ll}L$ shallow
-layers---costing $O(K N^2 d)$ once per image---and keeps all $L$ causal text
-layers at sequence length $T$, reducing total attention complexity to
-$O(K N^2 d + L T^2 d)$ with zero deep visual KV cache.
+visual patches merged into $N_c$ cells, and $T$ text tokens. Full token
+concatenation (\emph{LLaVA-Proj}) appends all $N_c$ visual cells across all
+$L$ layers, incurring $O\bigl(L(T{+}N_c)^2 d\bigr)$ self-attention compute and
+$O(L N_c d_{\mathrm{kv}})$ visual KV-cache overhead during autoregressive
+decoding. By contrast, \modelname-Free runs visual encoding in the first
+$K{\ll}L$ shallow layers---costing $O(K N^2 d)$ once per image---and keeps all
+$L$ causal text layers at sequence length $T$, yielding $O(K N^2 d + L T^2 d)$
+attention with zero visual KV entries in language self-attention. Meanwhile,
+SAVM computes conditioned rotations once per image--question prefill and reuses
+them across every decoding step while querying visual cells in a narrow
+$d_q{=}256$ subspace. Tab.~\ref{tab:supp_eff} reports the exact per-patch
+FLOPs and exclusive-GPU latency measurements underlying
+Fig.~\ref{fig:exp_highlights}(a,b).
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Compute and latency} versus visual patch count ($1.7$B,
+lightweight \texttt{hyb}, query length $64$, exclusive GPU; plotted in
+Fig.~\ref{fig:exp_highlights}(a,b)). At $4{,}096$ patches \modelname-Free{}
+uses $74.2\%$ fewer FLOPs and runs $19.5\%$ faster than token concatenation.}
+\label{tab:supp_eff}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}rcccc@{}}
+\toprule
+Patches & \modelname{} & ROSE & LLaVA & Saving \\
+ & (TFLOPs/ms) & (TFLOPs/ms) & (TFLOPs/ms) & FLOPs \\
+\midrule
+256  & 0.30/65.8  & 0.47/58.2  & 0.66/25.7  & $-54.8\%$ \\
+576  & 0.45/66.6  & 0.86/57.8  & 1.27/25.6  & $-64.9\%$ \\
+1024 & 0.67/69.8  & 1.45/63.8  & 2.18/33.7  & $-69.4\%$ \\
+2304 & 1.37/80.4  & 3.40/86.0  & 5.07/66.9  & $-72.9\%$ \\
+4096 & \textbf{2.54/99.4} & 6.82/126.1 & \textbf{9.85}/123.4 & $\mathbf{-74.2\%}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \paragraph{Direct vs.\ anchor-pooled spatial retrieval.}
 In the $21$k/$28$k reference setup (\texttt{hyb}), SAVM compresses $N_c$ visual
@@ -43,10 +70,9 @@ $9.70$ TFLOPs) to $101.9$\,ms ($19.9\%$ faster, $2.67$ TFLOPs, $-72.5\%$).
 
 \paragraph{Bit-exact text-only decoupling.}
 For any text-only input ($I{=}\emptyset$), the rotation context and retrieval
-residual are bypassed (\texttt{rotation\_context} inactive), so every layer executes
-the exact unmodified linear weights $W_{\ell,p}$ of $f_\theta$ with
-$\max|\Delta\text{logits}|=0.0$ and zero additional KV storage or runtime
-overhead.
+residual are bypassed (\texttt{rotation\_context} inactive), so every layer
+executes the exact unmodified linear weights $W_{\ell,p}$ of $f_\theta$ with
+$\max|\Delta\text{logits}|=0.0$ and zero extra KV-cache storage or decoding overhead.
 
 \section{Training Mixtures and Hyperparameters}
 \label{sec:supp_data}
@@ -62,7 +88,7 @@ image matching any of the $7{,}552$ evaluation images across all six public
 benchmarks by exact SHA1 or perceptual $64$-bit dHash (Hamming distance
 ${\le}2$), enforces strictly image-disjoint train/validation partitions
 ($39{,}949$ train / $4{,}441$ val rows, zero shared images), and balances
-multiple-choice letters A/B/C/D to $1{:}1{:}1{:}1$ and Yes/No items to $1{:}1$.
+multiple-choice letters A/B/C/D to $1{:}1{:}1{:}1$ and Yes/No items to an exact $1{:}1$ ratio.
 
 \begin{table}[t]
 \centering
@@ -88,13 +114,13 @@ Step 2 (VL-OPD) & $500 \mid 600$               & $2/1 \mid 2/1.5 \times 10^{-5}$
 Tab.~\ref{tab:supp_hparams} lists the exact optimization schedule and loss
 weights used for both regimes (Step~2 LR lists SAVM/frontend learning rates).
 In the $21$k regime, we compare pure cross-entropy initialisation (\texttt{ce})
-against the \texttt{rel} (\texttt{KD+Rel} in Fig.~\ref{fig:supp_eff}(c)) arm,
+against the \texttt{rel} (\texttt{KD+Rel} in Fig.~\ref{fig:supp_eff}) arm,
 which adds top-$K$ teacher logit KL ($0.5\mathcal{L}_{\mathrm{KD}}$,
 $\tau{=}2.0$) and projected hidden-state cosine alignment
 ($0.1\mathcal{L}_{\mathrm{rel}}$ across matched intermediate layers) during
 Stage~1 and Stage~3; while \texttt{KD+Rel} peaks earlier at $6$k samples,
-\texttt{ce} scales monotonically to $21$k and is used for all $44$k runs. All
-runs use AdamW with cosine decay on single $46$GB GPUs.
+\texttt{ce} scales monotonically to $21$k and is used for all $44$k runs. Every
+training run uses AdamW with cosine decay on an exclusive $46$GB GPU.
 
 \section{Extended Ablations and Multi-Seed Audits}
 \label{sec:supp_abl}
@@ -120,15 +146,41 @@ forced free-form greedy generation.}
 \label{fig:supp_abl}
 \end{figure*}
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.92\textwidth]{fig_efficiency.png}
-\caption{\textbf{Supplementary efficiency and data-scaling curves.}
-\textbf{(a, b)} Prefill FLOPs and single-GPU latency vs.\ patch count.
-\textbf{(c)} Validation full-answer accuracy for the \texttt{CE} and \texttt{KD+Rel}
-training arms from $1$k to $21$k samples.}
+\includegraphics[width=\columnwidth]{fig_data_scaling.pdf}
+\caption{\textbf{Data scaling across initialisation arms ($1$k--$21$k).}
+Validation full-answer accuracy for pure \texttt{CE} vs.\ \texttt{KD+Rel}
+(efficiency curves promoted to Fig.~\ref{fig:exp_highlights}(a,b)).}
 \label{fig:supp_eff}
-\end{figure*}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Frontend parameterisation on the $21$k base mixture ($s{=}0$,
+moved from Sec.~\ref{sec:abl}).} All validation and public scores come from
+the same joint checkpoint, grouped by initialisation arm (\texttt{rel} vs.\
+\texttt{ce}) and deep tier (\texttt{single}, \texttt{mf}, \texttt{hyb}).}
+\label{tab:supp_front}
+\footnotesize
+\setlength{\tabcolsep}{2.2pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lllccccccc@{}}
+\toprule
+Frontend & Arm & Deep & Params & Val CE$\downarrow$ & Gap$\uparrow$ & 1st/Full & MC2$\uparrow$ & Core3$\uparrow$ & Avg6$\uparrow$ \\
+\midrule
+none ($K{=}0$)     & rel & single & 0     & 5.237 & 0.501 & 24.0/16.0 & 35.92 & 31.15 & 15.81 \\
+rot                & rel & single & 2.32M & 1.973 & 1.130 & 40.7/17.3 & \textbf{40.73} & \textbf{33.89} & \textbf{17.55} \\
+full copy          & rel & single & 201M  & 1.745 & 1.857 & 43.3/20.0 & 38.82 & 32.08 & 16.80 \\
+\midrule
+\texttt{rots} & ce & single & 2.40M & 2.019 & 0.850 & 42.0/18.7 & 38.14 & 31.32 & 16.12 \\
+\midrule
+LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 30.73 & 15.82 \\
+\textbf{\texttt{rots}} & ce & mf  & \textbf{2.40M} & 1.549 & \textbf{1.783} & 43.3/17.3 & \textbf{41.32} & \textbf{33.55} & \textbf{17.33} \\
+\textbf{\texttt{rots}} & ce & hyb & \textbf{2.40M} & 1.554 & \textbf{1.866} & 43.3/16.0 & 40.20 & \textbf{33.57} & \textbf{17.37} \\
+\bottomrule
+\end{tabular}}
+\end{table}
 
 \begin{table}[t]
 \centering
@@ -260,9 +312,9 @@ Unbounded Rot ($A_3$)   & 13.07 & 10.52 &  8.20 & 11.79 & \textbf{99.97\%} &  0.
 \end{tabular}}
 \end{table}
 
-Tab.~\ref{tab:supp_scale}--\ref{tab:supp_fgen} and
-Fig.~\ref{fig:supp_mainres}--\ref{fig:supp_eff} provide the full scaling, depth,
-format-boundary, multi-seed, and \texttt{--force-gen} results moved from the
+Tab.~\ref{tab:supp_front}--\ref{tab:supp_fgen} and
+Fig.~\ref{fig:supp_mainres}--\ref{fig:supp_eff} provide the full frontend,
+scaling, depth, format-boundary, multi-seed, and \texttt{--force-gen} results moved from the
 main paper. In Tab.~\ref{tab:supp_v6seeds}, when an external frozen ViT supplies
 mature features (\emph{Tower}), continuing \texttt{CA-Only} ($R_0$) remains a
 competitive reference ($19.89\%$ Avg6), whereas bounded multi-frequency
@@ -308,7 +360,6 @@ reasoning ($30.00\%$ vs.\ $24.40\%$), and science ($31.20\%$ vs.\ $24.80\%$),
 while matching it on ChartQA human-authored queries ($12.88\%$ vs.\ $12.88\%$,
 $10.7{\times}$ higher than ROSE's $1.20\%$) and closing nearly all of the gap
 on MathVista multiple choice ($42.96\%$ vs.\ $43.70\%$). Under the same
-frozen-backbone setting, exact character/digit transcription in OCRBench
+frozen-backbone setting, exact character and digit transcription in OCRBench
 (\texttt{Regular Text}, \texttt{Handwriting}, \texttt{Digit String}, \texttt{KIE})
-is left to hybrid sparse-token extensions with explicit per-character KV memory
-(Limitation~(1) in Sec.~\ref{sec:conclusion}).
+remains a natural target for hybrid sparse-token KV-memory extensions.

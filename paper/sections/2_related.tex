@@ -21,7 +21,8 @@ instruction tuning and explored preference alignment to restore
 it~\citep{li2024multimodalpreference}.
 \modelname{} adds vision through trainable interfaces around a frozen LLM
 and bypasses these interfaces for text-only inputs, preserving the
-original computation without requiring subsequent language recovery.
+original computation without requiring subsequent preference alignment
+or language recovery.
 
 \paragraph{Efficiency Optimization for MLLMs.}
 Efficiency methods reduce visual sequence length, model size, or the cost
@@ -66,5 +67,5 @@ sequences, and GKD~\citep{agarwal2024gkd} matches teacher and student
 distributions on student rollouts with a choice of divergence.
 Building on on-policy distillation, \modelname{} combines image-conditioned
 forward KL with gold-answer supervision to refine its rotational visual
-interface on student rollouts, addressing the generation mismatch without
-updating the language backbone or adding inference modules.
+interface on student rollouts, addressing exposure bias without
+updating the frozen language backbone or adding extra test-time modules.

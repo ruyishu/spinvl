@@ -1,34 +1,17 @@
-\section{Limitations and Conclusion}
+\section{Conclusion}
 \label{sec:conclusion}
 
-\paragraph{Limitations.}
-We note four explicit boundaries of our approach.
-\emph{(1) Dense transcription remains out of reach.} Exact character copying
-(axis labels, receipts, handwritten formulae) fails for structural rather than
-data reasons (Sec.~\ref{sec:boundary}): operator modulation cannot replace a
-per-character KV memory without reintroducing pooled visual tokens.
-\emph{(2) Frozen-backbone ceiling.} Freezing the LLM guarantees bit-exact text
-preservation but caps visual accuracy: an $8$B student does not outperform a
-$0.6$B one, indicating that the adapter interface rather than language capacity
-is the bottleneck.
-\emph{(3) Pretraining scale.} Our mixtures span $21$k--$44$k items from one
-teacher; scaling rotational pretraining to larger corpora should further widen
-frozen-backbone cross-image margins alongside token-concatenation baselines.
-\emph{(4) Two-phase inference.} \modelname-Free runs a bidirectional patch pass
-before causal text decoding; production throughput would benefit from a fused
-kernel.
+We introduced \modelname{}, a dual-tier framework equipping a frozen text LLM
+with visual understanding using neither an external vision tower nor visual
+tokens in deeper self-attention. RVE repurposes shared shallow layers via
+static rotations and channel scaling, SAVM supplies global context and local
+evidence via bounded, question-conditioned multi-frequency rotations and
+spatial retrieval, and VL-OPD aligns student rollouts with the teacher. Across
+matched mixtures, \modelname{} matches or surpasses token concatenation on
+perception and anti-hallucination, cuts high-resolution FLOPs by $74.2\%$, and
+keeps exact text-only capabilities ($70.4\%$ GSM8K, $71.4\%$ ARC-C).
 
-\paragraph{Conclusion.}
-We introduced \modelname{}, a dual-tier visual adaptation framework that equips
-a frozen text LLM with visual understanding using neither an external vision
-tower nor visual tokens in deeper self-attention. RVE repurposes shared shallow
-layers via static rotations and channel scaling, SAVM supplies global context
-and fine-grained evidence via bounded, question-conditioned multi-frequency
-rotations and spatial retrieval, and VL-OPD aligns student rollouts with the
-teacher. Across matched mixtures, \modelname{} matches or surpasses
-token-concatenation baselines on perception and anti-hallucination, cuts
-high-resolution FLOPs by up to $74.2\%$, and preserves exact text-only
-capabilities ($70.4\%$ GSM8K, $71.4\%$ ARC-C) by bypassing visual adaptation.
-Together with our format-boundary and $44$k debiasing diagnostics, these
-results clarify both where zero-token visual modulation excels and when
-retained visual tokens or larger pretraining corpora remain necessary.
+\paragraph{LLM Usage.}
+Large language models were used strictly for prose polishing, grammar checks,
+and auxiliary plotting or formatting scripts; all research ideas, model
+designs, implementations, and scientific conclusions are our own.

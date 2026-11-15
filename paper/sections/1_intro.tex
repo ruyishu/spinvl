@@ -26,8 +26,8 @@ local evidence, particularly for distinguishing visual facts from
 language priors and reasoning about
 diagrams~\citep{guan2024hallusionbench,lu2024mathvista}.
 For an existing text LLM, the practical goal is therefore to acquire
-these visual capabilities with modest inference overhead while retaining
-its original text-only behavior.
+these visual capabilities with modest inference overhead while keeping
+its original text-only behavior and capabilities intact.
 
 Existing visual adaptation methods follow three representative designs.
 The first combines external visual encoding with token concatenation,
@@ -47,8 +47,8 @@ appending visual tokens to their self-attention sequences
 The third internalizes visual encoding within the language stack.
 EVE~\citep{diao2024eve} trains a decoder to process images and text
 directly, while VoRA~\citep{vora2025} equips shallow LLM layers with
-low-rank adapters~\citep{hu2021lora} for visual feature extraction
-(Figure~\ref{fig:teaser}(b), right).
+low-rank adapters~\citep{hu2021lora} for visual feature extraction inside
+the language stack (Figure~\ref{fig:teaser}(b), right).
 
 Each direction leaves unresolved challenges.
 Token-concatenation methods depend on an external vision tower and retain
@@ -68,8 +68,8 @@ These limitations motivate a unified question:
 
 \emph{Can a pretrained text LLM acquire visual understanding with no
 external vision tower at inference, no visual tokens in deeper
-self-attention, and exact preservation of its original text-only
-computation?}
+self-attention, and bit-exact preservation of its original text-only
+computation and behavior?}
 
 To meet these requirements, we present
 \textbf{Spin Vision-Language Adaptation (\modelname)} (Figure~\ref{fig:teaser}(c)), a dual-tier
@@ -115,6 +115,6 @@ Our contributions are as follows:
 
     \item We provide a controlled evaluation of visual understanding,
     free-form generation, inference efficiency, and text retention,
-    demonstrating competitive visual adaptation with substantially
-    reduced computation at high resolution.
+    demonstrating competitive multimodal accuracy with up to 74.2\%
+    fewer FLOPs at high resolution.
 \end{itemize}
