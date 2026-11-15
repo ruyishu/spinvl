@@ -1,0 +1,21 @@
+paper/sections/X_suppl.tex
+  s_2218750ca2fee0::t_ada4dd2caaef15 187-189,192,202,204-206
+scripts/verify_paper_numbers.py
+  s_2218750ca2fee0::t_42901cf3d7e542 169-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "6ac45373b1b505e3ea188e887fe40859af71b894",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-hydrogen"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
