@@ -1,0 +1,62 @@
+paper/sections/1_intro.tex
+  s_2218750ca2fee0::t_337845cb2380cd 71-72
+  s_2218750ca2fee0::t_bdbf85c0f544a9 50-51
+  s_2218750ca2fee0::t_9aead6ea107188 29-30
+  s_2218750ca2fee0::t_497633f2cd4e08 118-119
+scripts/plot_exp_highlights.py
+  s_2218750ca2fee0::t_b71b7d749169e7 1-33,35-48,50-71,73-80,82-144
+  s_2218750ca2fee0::t_9f86757c943bf7 34
+  s_2218750ca2fee0::t_83fd8a74254ad1 49
+  s_2218750ca2fee0::t_bef8c83c94ffd2 72,81
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_a3330d02943c14 173
+  s_2218750ca2fee0::t_57a9ac082e1e4b 162-163,168
+  s_2218750ca2fee0::t_3fd22453c42f6e 115-120,122-132,147-150,155-156
+  s_2218750ca2fee0::t_1384e0b6418c2b 8-11,13,15-16,18-19,27-32,36-42,44-47,51-56
+  s_2218750ca2fee0::t_58bc4bad54543a 151-154
+  s_2218750ca2fee0::t_4f1741e208f607 176,184,220-230
+  s_2218750ca2fee0::t_af2ec6a66c11e5 33
+  s_2218750ca2fee0::t_39e25b7c8100ab 67-71,100,105
+  s_2218750ca2fee0::t_41eb3d2eb7ce4e 292
+  s_2218750ca2fee0::t_4c85ecfa809b8f 164-167,169-172,177-183,185-186
+  s_2218750ca2fee0::t_8e5357741b69d9 270-272,278,281,285-289
+  s_2218750ca2fee0::t_e70fd93c09f8f4 273-277,279-280,282-284,290-291
+scripts/verify_paper_numbers.py
+  s_2218750ca2fee0::t_a62335f78be9b7 266-268
+  s_2218750ca2fee0::t_62ad9278874fb1 175-177
+paper/sections/X_suppl.tex
+  s_2218750ca2fee0::t_11b3ca9d8e11a7 363
+  s_2218750ca2fee0::t_fa7d26a270cd16 91
+  s_2218750ca2fee0::t_995b0e9299bbe8 117,122-123
+  s_2218750ca2fee0::t_6e5337f8118aab 149,156
+  s_2218750ca2fee0::t_8c60946a6ba7df 15,18-53,73-74
+  s_2218750ca2fee0::t_ba622a193a1ccb 160-183
+  s_2218750ca2fee0::t_996329a9c5a3ac 365
+  s_2218750ca2fee0::t_0089ed7e3ad7a1 315-317
+  s_2218750ca2fee0::t_351d5ac8e697f3 75
+paper/sections/2_related.tex
+  s_2218750ca2fee0::t_bead7a318ea6e5 24-25
+  s_2218750ca2fee0::t_12ff959ea69287 71
+  s_2218750ca2fee0::t_ee8a2f9de78ecc 70
+verify.md
+  s_2218750ca2fee0::t_0129b942873811 13-17,19,23,32-33,35-38,40-44,47,50,52-54,56-57
+paper/sections/5_conclusion.tex
+  s_2218750ca2fee0::t_f238572ce3a909 4-12,15-17
+  s_2218750ca2fee0::t_ae3a80bbb79a4b 1,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "0e4eefcec845d850a5d4f067f7c9ce26a67f7fe9",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-hydrogen"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
