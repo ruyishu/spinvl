@@ -1,0 +1,35 @@
+verify.md
+  s_2218750ca2fee0::t_e5fa33a482a84e 13-14,19
+paper/sections/X_suppl.tex
+  s_2218750ca2fee0::t_fc40098a73a20a 123
+  s_2218750ca2fee0::t_b0bd6451b3de96 131-142
+  s_2218750ca2fee0::t_501195f6efb8bf 124-126
+  s_2218750ca2fee0::t_dc9e1b77eb18ee 75
+  s_2218750ca2fee0::t_b6444972cc5fe3 100
+paper/sections/2_related.tex
+  s_2218750ca2fee0::t_e4cb951799d33b 71
+  s_2218750ca2fee0::t_1d3e7e7bf78f90 70
+paper/sections/1_intro.tex
+  s_2218750ca2fee0::t_0a81fe8c215eff 67-70
+paper/sections/4_experiments.tex
+  s_2218750ca2fee0::t_ace874f10e887d 33
+  s_2218750ca2fee0::t_bb9a94e1686d0b 292
+scripts/plot_exp_highlights.py
+  s_2218750ca2fee0::t_9c7ba4c10f84b5 121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.52-trip",
+  "base_commit_sha": "6b4964931e38f133617d336ab66dbe1c3c3a3c9c",
+  "prompts": {},
+  "sessions": {
+    "s_2218750ca2fee0": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_qiyggjh1ge8n",
+        "model": "gemini-4-hydrogen"
+      },
+      "human_author": "Kun Zhang （章坤）（FU-IBU） <kun.z@trip.com>"
+    }
+  }
+}
