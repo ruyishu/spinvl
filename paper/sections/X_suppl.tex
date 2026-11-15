@@ -72,7 +72,7 @@ $9.70$ TFLOPs) to $101.9$\,ms ($19.9\%$ faster, $2.67$ TFLOPs, $-72.5\%$).
 For any text-only input ($I{=}\emptyset$), the rotation context and retrieval
 residual are bypassed (\texttt{rotation\_context} inactive), so every layer
 executes the exact unmodified linear weights $W_{\ell,p}$ of $f_\theta$ with
-$\max|\Delta\text{logits}|=0.0$ and zero extra KV-cache storage or decoding overhead.
+$\max|\Delta\text{logits}|=0.0$ and zero extra KV-cache storage or runtime overhead.
 
 \section{Training Mixtures and Hyperparameters}
 \label{sec:supp_data}
@@ -97,6 +97,7 @@ reference runs and the $44$k strictly audited runs ($1.7$B student,
 $392{\times}392$ max resolution, $b{=}64$, $d_q{=}256$).}
 \label{tab:supp_hparams}
 \footnotesize
+\renewcommand{\arraystretch}{1.22}
 \setlength{\tabcolsep}{3.0pt}
 \resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}lccc@{}}
@@ -119,11 +120,25 @@ which adds top-$K$ teacher logit KL ($0.5\mathcal{L}_{\mathrm{KD}}$,
 $\tau{=}2.0$) and projected hidden-state cosine alignment
 ($0.1\mathcal{L}_{\mathrm{rel}}$ across matched intermediate layers) during
 Stage~1 and Stage~3; while \texttt{KD+Rel} peaks earlier at $6$k samples,
-\texttt{ce} scales monotonically to $21$k and is used for all $44$k runs. Every
-training run uses AdamW with cosine decay on an exclusive $46$GB GPU.
+\texttt{ce} scales monotonically to $21$k and is used for all $44$k runs. Across
+all $44$k runs, RVE adds $2.40$M parameters ($K{=}4$) and SAVM adds
+lightweight query-conditioned rotation and spatial retrieval heads with the
+student backbone frozen. All runs use AdamW with cosine decay on a $46$GB GPU.
 
 \section{Extended Ablations and Multi-Seed Audits}
 \label{sec:supp_abl}
+
+Tab.~\ref{tab:supp_front}--\ref{tab:supp_fgen} and
+Fig.~\ref{fig:supp_mainres}--\ref{fig:supp_eff} provide the full frontend,
+scaling, depth, format-boundary, multi-seed, and \texttt{--force-gen} results moved from the
+main paper. In Tab.~\ref{tab:supp_v6seeds}, when an external frozen ViT supplies
+mature features (\emph{Tower}), continuing \texttt{CA-Only} ($R_0$) remains a
+competitive reference ($19.89\%$ Avg6), whereas bounded multi-frequency
+\texttt{qcond} rotations drive consistent $R_1{\to}R_2{\to}R_3$ multi-seed gains
+($19.31\%{\to}19.52\%{\to}19.61\%$ Avg6), top single-seed and \texttt{--force-gen}
+performance ($R_2$ $20.18\%$ Avg6; $R_3$ $40.89\%$/$41.33\%$ MC2 in
+Tab.~\ref{tab:supp_fgen}), and prove decisive once the external vision tower is
+removed ($S_2$ over $F_2$: $1.155$ vs.\ $1.835$ CE, $40.8\%$ vs.\ $26.4\%$ EM).
 
 \begin{figure*}[t]
 \centering
@@ -311,18 +326,6 @@ Unbounded Rot ($A_3$)   & 13.07 & 10.52 &  8.20 & 11.79 & \textbf{99.97\%} &  0.
 \bottomrule
 \end{tabular}}
 \end{table}
-
-Tab.~\ref{tab:supp_front}--\ref{tab:supp_fgen} and
-Fig.~\ref{fig:supp_mainres}--\ref{fig:supp_eff} provide the full frontend,
-scaling, depth, format-boundary, multi-seed, and \texttt{--force-gen} results moved from the
-main paper. In Tab.~\ref{tab:supp_v6seeds}, when an external frozen ViT supplies
-mature features (\emph{Tower}), continuing \texttt{CA-Only} ($R_0$) remains a
-competitive reference ($19.89\%$ Avg6), whereas bounded multi-frequency
-\texttt{qcond} rotations drive consistent $R_1{\to}R_2{\to}R_3$ multi-seed gains
-($19.31\%{\to}19.52\%{\to}19.61\%$ Avg6), top single-seed and \texttt{--force-gen}
-performance ($R_2$ $20.18\%$ Avg6; $R_3$ $40.89\%$/$41.33\%$ MC2 in
-Tab.~\ref{tab:supp_fgen}), and prove decisive once the external vision tower is
-removed ($S_2$ over $F_2$: $1.155$ vs.\ $1.835$ CE, $40.8\%$ vs.\ $26.4\%$ EM).
 
 \section{Fine-Grained Category and Error Diagnostics}
 \label{sec:supp_cats}

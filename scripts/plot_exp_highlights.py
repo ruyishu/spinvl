@@ -118,7 +118,7 @@ def plot_fig3():
 
 
 def plot_data_scaling():
-    fig, ax = plt.subplots(figsize=(5.4, 3.6), dpi=300)
+    fig, ax = plt.subplots(figsize=(5.4, 2.75), dpi=300)
     Ns = [1, 3, 6, 12, 21]
     ce_acc = [19.7, 21.1, 20.5, 21.6, 22.4]
     rel_acc = [18.6, 18.7, 23.3, 19.4, 19.3]

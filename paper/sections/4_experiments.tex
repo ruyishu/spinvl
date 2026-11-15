@@ -30,7 +30,7 @@ candidate-string likelihood across all main tables, while open-ended items use
 unified greedy decoding (no per-benchmark token bans) with official relaxed
 metrics; full free-form audits (\texttt{--force-gen}) appear in
 Tab.~\ref{tab:supp_fgen}. We report \emph{MC2} (MMStar, HallusionBench),
-\emph{Core3} (+MathVista), and \emph{Avg6} (mean across all six tasks).
+\emph{Core3} (+MathVista), and \emph{Avg6} (average across all six evaluation tasks).
 
 \paragraph{Baselines and implementation.}
 All baselines share the frozen $1.7$B backbone, data, $392{\times}392$
@@ -289,4 +289,4 @@ $K{=}4$ LoRA ($S_1$) on CE, EM, gap, and MMStar ($28.87\%$ vs.\ $27.93\%$).
 (3) Step~2 over $S_2$ reaches $40.94\%$ MC2 / $35.32\%$ Core3 ($99.6\%$ of
 LLaVA-Proj) via $M_0/M_1$, while \texttt{Fwd-KL VL-OPD} ($M_2$) achieves the
 highest validation EM ($40.8\%$) and top tower-free MathVista ($24.90\%$),
-showing competitive accuracy with zero deep visual tokens or weight updates.
+showing competitive accuracy with zero deep visual tokens and an untouched LLM.

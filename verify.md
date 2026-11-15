@@ -10,13 +10,13 @@
 
 ### 1. CVPR 页数红线（已达标）
 - **CVPR 规则**：正文（`References` 之前的所有章节与图表）**严格 $\le 8.0$ 页**，`References` 页数不限，`X_suppl.tex` 作为补充材料单独提交。
-- **Overleaf 最新编译实测（13 页合编 PDF，`spinvl (7).pdf` / `paper/main.pdf`）**：
-  - `Abstract + 1. Intro + 2. Related`：Pages 1–3 上（`~2.2` 页）
+- **Overleaf 最新编译实测（13 页合编 PDF，`spinvl (14).pdf`）**：
+  - `Abstract + 1. Intro + 2. Related`：Pages 1–3 上（已合并 `1. Intro` 原孤立的 `a unified question:` 断行与短问句段，修正 `2. Related` 尾行并让 `3. Method / 3.1. Overview` 在第 3 页左下顺畅起段）
   - `3. Method`：Pages 3 上–6 上（含合作者拆分扩展的 `Eq. (1)–(17)` 与新版 `Fig. 2`；已将 `Inference and complexity` 迁至附录 `Sec. S1`）
   - `4. Experiments`：Pages 6 上–8 中（保留 `Tab. 1–3` 与新增跨双栏主图 **`Fig. 3`**）
   - `5. Conclusion` + `LLM Usage.`：Page 8 中下（正文与 `LLM Usage` 均在 **Page 8 结束**，严格 $\le 8.0$ 页！）
   - `References`：Page 8 底–Page 10（`[1]–[45]` 全部无误）
-  - `Supplementary Material`：Pages 11–13（`S1–S4`，`Tab. S1–S9`，`Fig. S1–S3`）
+  - `Supplementary Material`：Pages 11–13（`S1–S4`，`Tab. S1–S9`，`Fig. S1–S3`；第 11 页 `Tab. S2` 下方留白与第 12 页跨页孤行已消除，`Tab. S4` 已去方差下标，`Fig. S3` 移至第 13 页左栏与 `Tab. S9` 左右对称收尾）
   - **交稿前拆页提示**：下载编译 PDF 后，将 Pages 1–10 拆为 `main.pdf` 提交主稿，Pages 11–13 拆为 `supp.pdf` 提交补充材料（或注释 `main.tex` 第 47 行 `\input{sec/X_suppl}` 后分别导出）。
 
 ### 2. 效率口径策略：方案 A（已落地）
