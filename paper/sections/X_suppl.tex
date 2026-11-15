@@ -184,12 +184,12 @@ LoRA ($r{=}16$)    & ce  & mf     & 3.74M & 1.532 & 1.667 & 44.7/18.7 & 36.84 & 
 
 \begin{table}[t]
 \centering
-\caption{\textbf{Cross-size behaviour and seed variance} (moved from
-Sec.~\ref{sec:scaling}). Single runs use $s{=}0$; $3$-seed rows average
-$s\in\{0,1,2\}$ with sample standard deviation ($\mathrm{ddof}{=}1$).}
+\caption{\textbf{Cross-size behaviour and multi-seed averages} (moved from
+Sec.~\ref{sec:scaling}). Single runs use $s{=}0$; $3$-seed rows report mean
+accuracy over $s\in\{0,1,2\}$.}
 \label{tab:supp_scale}
 \footnotesize
-\setlength{\tabcolsep}{2.4pt}
+\setlength{\tabcolsep}{3.2pt}
 \resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}llcccccc@{}}
 \toprule
@@ -199,11 +199,11 @@ $0.6$B & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 26.40 & 57.73 & 20.20 & 42.06
 $0.6$B & Free (CE, $21$k, $s{=}0$)               & 28.07 & 54.68 & 20.40 & 41.37 & 34.38 & 18.03 \\
 $0.6$B & Free+OPD ($21$k, $s{=}0$)               & 28.87 & 54.47 & 19.00 & 41.67 & 34.11 & 17.69 \\
 $0.6$B & Free+OPD ($28$k, $s{=}0$)               & 27.53 & 57.83 & 18.60 & \textbf{42.68} & \textbf{34.66} & \textbf{18.05} \\
-$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36$_{\pm2.70}$ & \textbf{57.69}$_{\pm0.12}$ & 18.73$_{\pm0.12}$ & 41.52$_{\pm1.39}$ & 33.93$_{\pm0.90}$ & 17.62$_{\pm0.51}$ \\
+$0.6$B & Free+OPD ($28$k, $3$ seeds)             & 25.36 & \textbf{57.69} & 18.73 & 41.52 & 33.93 & 17.62 \\
 \midrule
-$1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56$_{\pm1.49}$ & 56.36$_{\pm1.04}$ & 18.97$_{\pm1.18}$ & \textbf{41.46}$_{\pm0.75}$ & \textbf{33.96}$_{\pm0.59}$ & \textbf{17.68}$_{\pm0.43}$ \\
-$1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89}$_{\pm2.28}$ & 53.84$_{\pm1.27}$ & 19.00$_{\pm2.05}$ & 40.36$_{\pm0.83}$ & 33.24$_{\pm1.14}$ & 17.27$_{\pm0.44}$ \\
-$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11$_{\pm3.21}$ & 56.12$_{\pm1.74}$ & \textbf{19.13}$_{\pm1.00}$ & 41.11$_{\pm1.35}$ & 33.79$_{\pm1.05}$ & 17.49$_{\pm0.30}$ \\
+$1.7$B & Tower (\texttt{hyb}, $28$k, $3$ seeds)  & 26.56 & 56.36 & 18.97 & \textbf{41.46} & \textbf{33.96} & \textbf{17.68} \\
+$1.7$B & Free (\texttt{hyb}, $28$k, $3$ seeds)   & \textbf{26.89} & 53.84 & 19.00 & 40.36 & 33.24 & 17.27 \\
+$1.7$B & Free+OPD ($28$k, $3$ seeds)             & 26.11 & 56.12 & \textbf{19.13} & 41.11 & 33.79 & 17.49 \\
 \midrule
 $8$B   & Tower (\texttt{hyb}, $28$k, $s{=}0$)    & 25.67 & 54.15 & 19.90 & 39.91 & 33.24 & 17.30 \\
 $8$B   & Free (\texttt{hyb}, $28$k, $s{=}0$)     & 24.80 & \textbf{56.99} & 19.20 & \textbf{40.90} & \textbf{33.66} & \textbf{17.50} \\

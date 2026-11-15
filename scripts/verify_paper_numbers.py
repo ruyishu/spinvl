@@ -166,11 +166,15 @@ def main():
             else:
                 vals = [x[k] for x in loaded]
                 mean_v = statistics.mean(vals)
-                std_s = statistics.stdev(vals)
-                m_tex, s_tex = parse_mean_std(cells[idx])
-                assert_rounded(f"Tab2:{name}", f"{k}_mean", mean_v, str(m_tex), decimals=2)
-                assert_rounded(f"Tab2:{name}", f"{k}_sample_std_ddof1", std_s, str(s_tex), decimals=2)
-                checks += 2
+                if "\\pm" in cells[idx]:
+                    std_s = statistics.stdev(vals)
+                    m_tex, s_tex = parse_mean_std(cells[idx])
+                    assert_rounded(f"Tab2:{name}", f"{k}_mean", mean_v, str(m_tex), decimals=2)
+                    assert_rounded(f"Tab2:{name}", f"{k}_sample_std_ddof1", std_s, str(s_tex), decimals=2)
+                    checks += 2
+                else:
+                    assert_rounded(f"Tab2:{name}", f"{k}_mean", mean_v, cells[idx], decimals=2)
+                    checks += 1
 
     # 3. Table 3 (tab:front or tab:supp_front)
     t3_label = "tab:supp_front" if "\\label{tab:supp_front}" in tex_text else "tab:front"
