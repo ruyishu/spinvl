@@ -61,6 +61,10 @@ frontend, $3{,}000$ joint, $500$ VL-OPD steps); the $44$k audit uses the
 stabilized \texttt{qcond}+\texttt{direct\_hyb} ($\tau_{\mathrm{rot}}{=}0.12$)
 setup ($2{,}400$ Stage~1 steps, $+800$ for $R_1$--$R_3$, $2{,}200$ frontend,
 $1{,}200$ joint, $600$ Step~2 steps; full details in Tab.~\ref{tab:supp_hparams}).
+All $44$k runs use cross-entropy initialisation (\texttt{ce}), whereas $21$k
+offline baselines also compare a teacher logit/hidden alignment arm
+(\texttt{rel}, adding $0.5\mathcal{L}_{\mathrm{KD}}{+}0.1\mathcal{L}_{\mathrm{rel}}$;
+Sec.~\ref{sec:supp_data}).
 
 \subsection{Main Results}
 \label{sec:main}

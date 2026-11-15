@@ -56,8 +56,8 @@
 - [x] **专有名词大括号保护与作者重音修复**：已保护 `{LoRA}`、`{OCR}`、`{Inter-GPS}`、`{ChartQA}`、`{DocVQA}`、`{VQA}`、`Try {ARC}, the {AI2}`，并修复 Flamingo 作者 `{Bi{\'n}kowski}` 与 `Karen Simonyan`。
 
 ### `sec/X_suppl.tex` & `main.tex`
-- [x] **重构 `X_suppl.tex`（S1–S4）与附图重绘**：包含 S1 架构复杂度与无损旁路细节、S2 数据去漏审计与超参精确对照表（`Tab. S1`，区分 `44k` 与 `21k/28k` 损失项）、S3 重绘并去重遮挡/去除 `v5` 内部标签的 `Fig. S1–S3`、迁出的 `Tab. S2–S4`（修正 `Tab. S4` `5.49` 加粗）、`44k` 多 seed 汇总 `Tab. S5`（含 `R0` vs `R1–R3` / `S2` vs `F2` 积极定位说明）与 `--force-gen` 全量表（`Tab. S6`），以及 S4 细分能力与 OCR 错误边界诊断表（`Tab. S7`）。
-- [x] **编译与校验**：Overleaf 编译 0 错误、0 警告、全篇 0 处 `??`，第 4 页 `Eq. (6)` 与第 8 页收尾排版已逐页渲染核验；`python scripts/verify_paper_numbers.py` 545 项校验通过，`Tab. S5–S6` 150 项校验通过。
+- [x] **重构 `X_suppl.tex`（S1–S4）与附图重绘**：包含 S1 架构复杂度与无损旁路细节、S2 数据去漏审计、超参精确对照表（`Tab. S1` 合并为 4 列以放大字号，区分 `21k/28k` 与 `44k` 的 `Step 2` 权重与学习率）及 `ce` vs.\ `rel`（`KD+Rel` / `Fig. S3(c)`）分支定义（同时在 `4.1` 节同步定义）、移除附录重复 `\citep` 消除主文 `[23]/[35]` 末尾 `, 1` 回指页码污染、S3 重绘并对齐 `VoRA-style LoRA` 图例的 `Fig. S1–S3`、迁出的 `Tab. S2–S4`（修正 `Tab. S4` `5.49` 加粗）、`44k` 多 seed 汇总 `Tab. S5`（含 `R0` vs `R1–R3` / `S2` vs `F2` 积极定位说明）与 `--force-gen` 全量表（`Tab. S6` 表注补全 `plus R3 at s=1` 与统一加粗）、以及 S4 细分能力与诊断表（`Tab. S7` 修正 `HallusionBench VD` `53.30` 加粗与 `VS` 并列 `55.00` 加粗，并以零 token 优势自然收束）。
+- [x] **编译与校验**：Overleaf 编译 0 错误、0 警告、全篇 0 处 `??`，第 4 页 `Eq. (6)`、第 8 页收尾、第 8–10 页 `[23]/[35]` 回指与第 11–13 页附录排版已逐页渲染核验；`python scripts/verify_paper_numbers.py` 545 项校验通过，`Tab. S5–S6` 150 项校验通过。
 
 ### 待人工确认小项（非阻塞）
 - [ ] 请合作者按对话提供的精简修改清单更新 `figures/spinvl_method.pdf`（补充 `qcond`、`direct_hyb`、$\tau_{\mathrm{rot}}\tanh$ 与门控符号 $\tilde{x}$）。

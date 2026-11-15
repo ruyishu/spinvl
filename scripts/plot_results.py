@@ -38,7 +38,7 @@ def plot_main_results():
     data = {
         "LLaVA-Proj (Full Tok, 21k)":        [29.60, 53.10, 24.90, 41.35, 35.87],
         "ROSE (Single-Freq, 21k)":           [25.60, 54.36, 19.70, 39.98, 33.22],
-        "VoRA (LoRA K=4, 21k)":              [23.73, 49.95, 18.50, 36.84, 30.73],
+        "VoRA-style LoRA (K=4, 21k)":        [23.73, 49.95, 18.50, 36.84, 30.73],
         "SpinVL-Tower (hyb, 21k, Ours)":     [30.60, 58.15, 18.50, 44.37, 35.75],
         "SpinVL-Free+OPD (1.7B, 21k, Ours)": [27.93, 56.99, 19.80, 42.46, 34.91],
         "SpinVL-Free+OPD (0.6B, 28k, Ours)": [27.53, 57.83, 18.60, 42.68, 34.66],
@@ -72,7 +72,7 @@ def plot_main_results():
     ax1.set_title("(a) Public Multimodal Benchmark Comparison", fontsize=11.5, fontweight="bold", pad=10)
     ax1.legend(loc="upper right", fontsize=8.3, frameon=True, ncol=2)
 
-    variants = ["SpinVL\n(Decoupled)", "Merged\nrot_K4", "Merged\nrots_K4", "Merged\nLoRA (VoRA)"]
+    variants = ["SpinVL\n(Decoupled)", "Merged\nrot_K4", "Merged\nrots_K4", "Merged\nLoRA"]
     gsm = [70.4, 0.0, 0.8, 0.0]
     arc = [71.4, 24.2, 23.4, 27.4]
     x2 = np.arange(len(variants))
@@ -159,7 +159,7 @@ def plot_ablations():
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14.0, 4.2), dpi=240)
 
     # Panel A: Controlled Frontend Mode Ablation grouped by arm (rel vs ce, 21k s=0)
-    modes = ["none\n(K=0)", "full\n(Copy)", "rot\n(SO(64))", "LoRA+mf\n(VoRA)", "rots\n(single)", "rots+mf\n(Ours)"]
+    modes = ["none\n(K=0)", "full\n(Copy)", "rot\n(SO(64))", "VoRA-style\nLoRA+mf", "rots\n(single)", "rots+mf\n(Ours)"]
     mc2 = [35.92, 38.82, 40.73, 36.84, 38.14, 41.32]
     core3 = [31.15, 32.08, 33.89, 30.73, 31.32, 33.55]
     x1 = np.arange(len(modes))
